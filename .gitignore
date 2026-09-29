@@ -1,0 +1,15 @@
+# Binaries
+bin/
+*.exe
+*.test
+*.out
+
+# Coverage / Profiles
+*.cover
+*.prof
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
