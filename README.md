@@ -2,7 +2,7 @@
 
 > **Engineering for Reality: SLA-Driven Fault Tolerance in a Single Go Process**
 
-This repository contains a production-grade demonstration and parameterized test suite showcasing resilience patterns using [`failsafe-go`](https://github.com/failsafe-go/failsafe-go).
+This repository contains a production-grade demonstration and parameterized test suite showcasing resilience patterns using [`failsafe-go`](https://github.com/failsafe-go/failsafe-go) (official documentation at [failsafe-go.dev](https://failsafe-go.dev)).
 
 ---
 
@@ -95,3 +95,14 @@ Coverage includes:
 - Circuit breaker fast-fail verification.
 - High-concurrency bulkhead isolation burst test under the Go race detector.
 - Context cancellation propagation test.
+
+---
+
+## 6. Reference Documentation & Foundational Literature
+
+- **Failsafe-go Official Site & Docs:** [failsafe-go.dev](https://failsafe-go.dev)
+  - [Retry Policy Guide](https://failsafe-go.dev/retry)
+  - [Circuit Breaker Guide](https://failsafe-go.dev/circuit-breaker)
+  - [Fallback Policy Guide](https://failsafe-go.dev/fallback)
+  - [Timeout Policy Guide](https://failsafe-go.dev/timeout)
+- **Foundational Architecture Book:** *Release It! Design and Deploy Production-Ready Software (2nd Edition)* by Michael T. Nygard.
