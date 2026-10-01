@@ -34,19 +34,23 @@ In `failsafe-go`, policies wrap from **Outer to Inner**:
   │
   ▼
 ┌───────────────────────────────────────────────────────────┐
-│ 1. Fallback (Outer-most)                                  │
-│    Catches gateway errors / timeout -> REVIEW_PENDING     │
+│ 1. Fallback Policy (Outermost Shield)                     │
+│    Catches fatal errors & timeout breaches -> degraded    │
 │  ┌───────────────────────────────────────────────────────┐│
-│  │ 2. Overall Timeout (400ms Time Budget Envelope)       ││
+│  │ 2. Overall Operation Timeout Policy (400ms Upper Bound)││
 │  │    Caps cumulative duration across all retry attempts ││
 │  │  ┌───────────────────────────────────────────────────┐││
 │  │  │ 3. Retry Policy (Max 2 Retries, Backoff + Jitter) │││
-│  │  │    Handles transient 503 / network drops          │││
+│  │  │    Handles transient 503 / socket network drops   │││
 │  │  │  ┌───────────────────────────────────────────────┐│││
 │  │  │  │ 4. Circuit Breaker (3 failures in 10 attempts)││││
-│  │  │  │    Fast-fails immediately when gateway is dead││││
+│  │  │  │    Fast-fails in < 1ms when gateway is dead   ││││
 │  │  │  │  ┌───────────────────────────────────────────┐││││
-│  │  │  │  │ 5. Target Function (HTTP / gRPC Client)   │││││
+│  │  │  │  │ 5. Per-Attempt Timeout Policy (150ms)     │││││
+│  │  │  │  │    Caps single HTTP socket attempt        │││││
+│  │  │  │  │  ┌─────────────────────────────────────┐  │││││
+│  │  │  │  │  │ 6. Target Function (HTTP/gRPC Call) │  │││││
+│  │  │  │  │  └─────────────────────────────────────┘  │││││
 │  │  │  │  └───────────────────────────────────────────┘││││
 │  │  │  └───────────────────────────────────────────────┘│││
 │  │  └───────────────────────────────────────────────────┘││
@@ -56,19 +60,125 @@ In `failsafe-go`, policies wrap from **Outer to Inner**:
 
 ---
 
-## 3. Interface Decoupling & Swappability
+## 3. Best Practice: Mandatory Context & Cancellation Support Across All Activities
 
-Every external dependency implements a distinct Go interface:
+### Architectural Mandate
+In a high-throughput, fault-tolerant Go application, **every outbound dependency and activity interface MUST accept `context.Context` as its first parameter and strictly honor cancellation signals.**
 
-- **`PaymentGateway`** (`pkg/checkout/interfaces.go`): Interface for 3rd-party credit/debit charges.
-- **`InventoryService`** (`pkg/checkout/interfaces.go`): Interface for checking, locking, and releasing inventory stock.
-- **`FraudService`** (`pkg/checkout/interfaces.go`): Interface for ML risk evaluation and heuristic fallback.
-- **`LoyaltyService`** (`pkg/checkout/interfaces.go`): Interface for asynchronous non-blocking rewards.
-- **`TelemetryRecorder`** (`pkg/checkout/interfaces.go`): Interface for Prometheus metrics and OpenTelemetry span event hooks.
+Without context propagation, when a `failsafe-go` Operation Timeout or Per-Attempt Timeout fires:
+- The orchestrator moves on, but the underlying goroutine and TCP socket remain active in the background.
+- Memory buffers, connection pool slots, and file descriptors remain locked, leading to **silent resource exhaustion and cascading server crashes**.
+
+### The 3 Rules of Context-Aware Resilience:
+1. **Pass `exec.Context()` to Outbound Calls:** When invoking downstream services inside a failsafe executor, always pass `exec.Context()` down the call stack. Failsafe-go attaches its active attempt and overall timeouts to this context.
+2. **Close Network Resources on Cancellation:** Use `http.NewRequestWithContext` or standard database drivers with `ExecContext`/`QueryContext` so that socket disconnects immediately abort in-flight TCP streams.
+3. **Check `ctx.Done()` in Long-Running Operations:** For compute-heavy or batched activities, periodically check `ctx.Done()` or `ctx.Err()` to exit early before doing wasted computation.
+
+### Example Service Implementation: Context-Aware HTTP Client
+
+Here is an example demonstrating how a production downstream payment client should be structured:
+
+```go
+package downstream
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/failsafe-go-demo/checkout/pkg/checkout"
+)
+
+// HTTPPaymentGateway implements checkout.PaymentGateway with strict context support.
+type HTTPPaymentGateway struct {
+	client  *http.Client
+	baseURL string
+}
+
+func NewHTTPPaymentGateway(baseURL string, transportTimeout time.Duration) *HTTPPaymentGateway {
+	return &HTTPPaymentGateway{
+		baseURL: baseURL,
+		client: &http.Client{
+			// Transport-level connection timeout (handshake/connect)
+			Timeout: transportTimeout,
+		},
+	}
+}
+
+// Charge executes an external HTTP charge while strictly honoring context cancellation.
+func (g *HTTPPaymentGateway) Charge(ctx context.Context, req checkout.PaymentRequest) (checkout.PaymentResponse, error) {
+	// 1. Early exit check: Don't start work if context is already canceled/timed out
+	if err := ctx.Err(); err != nil {
+		return checkout.PaymentResponse{}, err
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return checkout.PaymentResponse{}, fmt.Errorf("failed to serialize request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/charges", g.baseURL)
+
+	// 2. Attach context to HTTP request:
+	// When failsafe-go attempt timeout (e.g. 150ms) fires, ctx is canceled,
+	// immediately terminating the active TCP connection and closing OS sockets.
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return checkout.PaymentResponse{}, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Idempotency-Key", req.IdempotencyKey)
+
+	// 3. Execute HTTP call
+	resp, err := g.client.Do(httpReq)
+	if err != nil {
+		// If context was canceled or timed out during flight, return ctx.Err() directly
+		if ctx.Err() != nil {
+			return checkout.PaymentResponse{}, ctx.Err()
+		}
+		return checkout.PaymentResponse{}, checkout.ErrTransientNetwork
+	}
+	defer resp.Body.Close() // Ensure connection is returned to pool immediately
+
+	// 4. Handle HTTP response status
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return checkout.PaymentResponse{}, checkout.ErrGatewayUnavailable
+	} else if resp.StatusCode == http.StatusTooManyRequests {
+		return checkout.PaymentResponse{}, checkout.ErrRateLimited
+	} else if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return checkout.PaymentResponse{}, checkout.ErrInvalidPayment
+	} else if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return checkout.PaymentResponse{}, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var payResp checkout.PaymentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payResp); err != nil {
+		return checkout.PaymentResponse{}, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return payResp, nil
+}
+```
 
 ---
 
-## 4. Running the Interactive Demo
+## 4. Interface Decoupling & Swappability
+
+Every external dependency implements a distinct Go interface (`pkg/checkout/interfaces.go`):
+
+- **`PaymentGateway`**: Interface for 3rd-party credit/debit charges.
+- **`InventoryService`**: Interface for checking, locking, and releasing warehouse inventory.
+- **`FraudService`**: Interface for ML risk evaluation and heuristic fallback.
+- **`LoyaltyService`**: Interface for asynchronous non-blocking rewards.
+- **`TelemetryRecorder`**: Interface for Prometheus metrics and OpenTelemetry span event hooks.
+
+---
+
+## 5. Running the Interactive Demo
 
 To run the interactive CLI demo covering all 4 live presentation scenarios:
 
@@ -84,7 +194,7 @@ go run ./cmd/demo/main.go
 
 ---
 
-## 5. Running the Parameterized Test Suite
+## 6. Running the Parameterized Test Suite
 
 ```bash
 go test -v -race ./...
@@ -98,7 +208,7 @@ Coverage includes:
 
 ---
 
-## 6. Reference Documentation & Foundational Literature
+## 7. Reference Documentation & Foundational Literature
 
 - **Failsafe-go Official Site & Docs:** [failsafe-go.dev](https://failsafe-go.dev)
   - [Retry Policy Guide](https://failsafe-go.dev/retry)
