@@ -17,9 +17,11 @@ type Orchestrator struct {
 	loyaltySvc     LoyaltyService
 	telemetry      TelemetryRecorder
 
-	paymentExecutor failsafe.Executor[PaymentResponse]
-	paymentCB       circuitbreaker.CircuitBreaker[PaymentResponse]
-	fraudExecutor   failsafe.Executor[RiskScore]
+	paymentExecutor   failsafe.Executor[PaymentResponse]
+	paymentCB         circuitbreaker.CircuitBreaker[PaymentResponse]
+	inventoryExecutor failsafe.Executor[any]
+	fraudExecutor     failsafe.Executor[RiskScore]
+	loyaltyExecutor   failsafe.Executor[any]
 }
 
 // NewOrchestrator initializes the orchestrator with interface-injected dependencies and policy executors.
@@ -30,20 +32,26 @@ func NewOrchestrator(
 	loyalty LoyaltyService,
 	telemetry TelemetryRecorder,
 	policyCfg PaymentPolicyConfig,
+	invCfg InventoryPolicyConfig,
 	fraudCfg FraudPolicyConfig,
+	loyaltyCfg LoyaltyPolicyConfig,
 ) *Orchestrator {
 	pExec, cb := BuildPaymentExecutor(policyCfg)
+	iExec := BuildInventoryExecutor(invCfg)
 	fExec := BuildFraudExecutor(fraudCfg)
+	lExec := BuildLoyaltyExecutor(loyaltyCfg)
 
 	return &Orchestrator{
-		paymentGateway:  payment,
-		inventorySvc:    inventory,
-		fraudSvc:        fraud,
-		loyaltySvc:      loyalty,
-		telemetry:       telemetry,
-		paymentExecutor: pExec,
-		paymentCB:       cb,
-		fraudExecutor:   fExec,
+		paymentGateway:    payment,
+		inventorySvc:      inventory,
+		fraudSvc:          fraud,
+		loyaltySvc:        loyalty,
+		telemetry:         telemetry,
+		paymentExecutor:   pExec,
+		paymentCB:         cb,
+		inventoryExecutor: iExec,
+		fraudExecutor:     fExec,
+		loyaltyExecutor:   lExec,
 	}
 }
 
@@ -61,7 +69,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 		}, err
 	}
 
-	// 1. Semi-Critical Dependency: Fraud Evaluation (Max 100ms budget with fallback)
+	// 1. Semi-Critical Dependency: Fraud Evaluation (Operation Timeout Policy: 100ms budget with fallback)
 	fraudResult, err := o.fraudExecutor.WithContext(ctx).GetWithExecution(func(exec failsafe.Execution[RiskScore]) (RiskScore, error) {
 		return o.fraudSvc.EvaluateRisk(exec.Context(), req)
 	})
@@ -83,11 +91,11 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 		}, ErrFraudThreshold
 	}
 
-	// 2. Hard Critical Dependency: Inventory Lock (150ms timeout)
-	invCtx, invCancel := context.WithTimeout(ctx, 150*time.Millisecond)
-	defer invCancel()
-
-	if err := o.inventorySvc.LockInventory(invCtx, req.ItemID, req.Quantity); err != nil {
+	// 2. Hard Critical Dependency: Inventory Lock (Operation Timeout Policy: 150ms upper bound)
+	err = o.inventoryExecutor.WithContext(ctx).RunWithExecution(func(exec failsafe.Execution[any]) error {
+		return o.inventorySvc.LockInventory(exec.Context(), req.ItemID, req.Quantity)
+	})
+	if err != nil {
 		return OrderResult{
 			OrderID: req.OrderID,
 			Status:  "FAILED",
@@ -97,6 +105,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 	}
 
 	// 3. Hard Critical Dependency: Payment Gateway Execution via Policy Onion
+	// (Overall Operation Timeout: 400ms upper bound wrapping retries + per-attempt timeout: 150ms)
 	var attempts int
 	paymentResp, err := o.paymentExecutor.WithContext(ctx).GetWithExecution(func(exec failsafe.Execution[PaymentResponse]) (PaymentResponse, error) {
 		attempts = exec.Attempts()
@@ -137,12 +146,12 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 		}, nil
 	}
 
-	// 4. Soft Non-Critical Dependency: Loyalty Points (Async fire & forget)
+	// 4. Soft Non-Critical Dependency: Loyalty Points (Async Operation Timeout Policy: 200ms)
 	if o.loyaltySvc != nil {
 		go func() {
-			asyncCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-			defer cancel()
-			_ = o.loyaltySvc.AccruePoints(asyncCtx, req.CustomerID, req.Amount)
+			_ = o.loyaltyExecutor.RunWithExecution(func(exec failsafe.Execution[any]) error {
+				return o.loyaltySvc.AccruePoints(exec.Context(), req.CustomerID, req.Amount)
+			})
 		}()
 	}
 

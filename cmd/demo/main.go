@@ -52,14 +52,13 @@ func printResult(res checkout.OrderResult, err error) {
 
 func main() {
 	fmt.Printf("%s%sFAILSAFE-GO ARCHITECTURE DEMO: 20-MINUTE LIVE SCENARIOS%s\n", ColorBold, ColorGreen, ColorReset)
-	fmt.Printf("Demonstrating Time Budgeting, Policy Composition, and Single-Process Fault Tolerance\n")
+	fmt.Printf("Demonstrating Operation Time Budgeting, Policy Composition, and Single-Process Fault Tolerance\n")
 
 	telemetry := checkout.NewInMemoryTelemetry()
 	payPolicyCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
-	fraudPolicyCfg := checkout.FraudPolicyConfig{
-		Timeout:   100 * time.Millisecond,
-		Telemetry: telemetry,
-	}
+	invPolicyCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
+	fraudPolicyCfg := checkout.DefaultFraudPolicyConfig(telemetry)
+	loyaltyPolicyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
 	// -------------------------------------------------------------------------
 	// SCENARIO 1: Happy Path
@@ -70,7 +69,7 @@ func main() {
 	fraud1 := downstream.NewFraudService(30 * time.Millisecond)
 	loyalty1 := downstream.NewLoyaltyService()
 
-	orch1 := checkout.NewOrchestrator(payGateway1, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, fraudPolicyCfg)
+	orch1 := checkout.NewOrchestrator(payGateway1, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
 
 	req1 := checkout.OrderRequest{
 		OrderID:     "ORD-2026-001",
@@ -92,7 +91,7 @@ func main() {
 	payGateway2 := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
 	payGateway2.QueueFailures(checkout.ErrGatewayUnavailable) // 1st attempt fails
 
-	orch2 := checkout.NewOrchestrator(payGateway2, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, fraudPolicyCfg)
+	orch2 := checkout.NewOrchestrator(payGateway2, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
 
 	req2 := checkout.OrderRequest{
 		OrderID:     "ORD-2026-002",
@@ -116,7 +115,7 @@ func main() {
 		payGateway3.QueueFailures(checkout.ErrGatewayUnavailable)
 	}
 
-	orch3 := checkout.NewOrchestrator(payGateway3, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, fraudPolicyCfg)
+	orch3 := checkout.NewOrchestrator(payGateway3, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
 
 	for i := 1; i <= 4; i++ {
 		req := checkout.OrderRequest{
@@ -140,7 +139,7 @@ func main() {
 	payGateway4 := downstream.NewSimulatedPaymentGateway(50 * time.Millisecond)
 	fraud4 := downstream.NewFraudService(300 * time.Millisecond) // ML model hangs for 300ms (> 100ms budget)
 
-	orch4 := checkout.NewOrchestrator(payGateway4, inventory1, fraud4, loyalty1, telemetry, payPolicyCfg, fraudPolicyCfg)
+	orch4 := checkout.NewOrchestrator(payGateway4, inventory1, fraud4, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
 
 	req4 := checkout.OrderRequest{
 		OrderID:     "ORD-2026-004",

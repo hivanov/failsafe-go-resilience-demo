@@ -12,41 +12,43 @@ import (
 
 // PaymentPolicyConfig holds tunable parameters for the payment execution policy
 type PaymentPolicyConfig struct {
-	OverallTimeout time.Duration
-	MaxRetries     int
-	BackoffMin     time.Duration
-	BackoffMax     time.Duration
-	JitterFactor   float64
-	CBThreshold    uint
-	CBCapacity     uint
-	CBDelay        time.Duration
-	Telemetry      TelemetryRecorder
+	OverallOperationTimeout time.Duration // Hard upper bound for cumulative operation
+	AttemptTimeout          time.Duration // Per-attempt socket timeout
+	MaxRetries              int
+	BackoffMin              time.Duration
+	BackoffMax              time.Duration
+	JitterFactor            float64
+	CBThreshold             uint
+	CBCapacity              uint
+	CBDelay                 time.Duration
+	Telemetry               TelemetryRecorder
 }
 
 // DefaultPaymentPolicyConfig returns production-calibrated defaults based on the 800ms SLA
 func DefaultPaymentPolicyConfig(telemetry TelemetryRecorder) PaymentPolicyConfig {
 	return PaymentPolicyConfig{
-		OverallTimeout: 400 * time.Millisecond,
-		MaxRetries:     2,
-		BackoffMin:     40 * time.Millisecond,
-		BackoffMax:     120 * time.Millisecond,
-		JitterFactor:   0.2,
-		CBThreshold:    3,
-		CBCapacity:     10,
-		CBDelay:        5 * time.Second,
-		Telemetry:      telemetry,
+		OverallOperationTimeout: 400 * time.Millisecond,
+		AttemptTimeout:          150 * time.Millisecond,
+		MaxRetries:              2,
+		BackoffMin:              40 * time.Millisecond,
+		BackoffMax:              120 * time.Millisecond,
+		JitterFactor:            0.2,
+		CBThreshold:             3,
+		CBCapacity:              10,
+		CBDelay:                 5 * time.Second,
+		Telemetry:               telemetry,
 	}
 }
 
 // BuildPaymentExecutor builds the failsafe-go Policy Onion for 3rd-party payments.
 // Composition order (Outer -> Inner):
-// Fallback -> OverallTimeout -> RetryPolicy -> CircuitBreaker
+// Fallback -> OverallOperationTimeout (400ms) -> RetryPolicy -> CircuitBreaker -> AttemptTimeout (150ms) -> Target
 func BuildPaymentExecutor(cfg PaymentPolicyConfig) (failsafe.Executor[PaymentResponse], circuitbreaker.CircuitBreaker[PaymentResponse]) {
-	// 1. Overall Time Budget (Outer-most timeout)
-	outerTimeout := timeout.NewBuilder[PaymentResponse](cfg.OverallTimeout).
+	// 1. Overall Operation Timeout (Outer-most upper bound for the entire multi-try operation)
+	operationTimeout := timeout.NewBuilder[PaymentResponse](cfg.OverallOperationTimeout).
 		OnTimeoutExceeded(func(e failsafe.ExecutionDoneEvent[PaymentResponse]) {
 			if cfg.Telemetry != nil {
-				cfg.Telemetry.RecordTimeout("payment_gateway", cfg.OverallTimeout.Milliseconds())
+				cfg.Telemetry.RecordTimeout("payment_gateway_overall", cfg.OverallOperationTimeout.Milliseconds())
 			}
 		}).
 		Build()
@@ -96,23 +98,67 @@ func BuildPaymentExecutor(cfg PaymentPolicyConfig) (failsafe.Executor[PaymentRes
 	}
 	cb := cbBuilder.Build()
 
-	// Compose Outer to Inner
-	executor := failsafe.With(fallbackPolicy, outerTimeout, retryPol, cb)
+	// 5. Per-Attempt Timeout (Inner-most timeout capping single HTTP request socket)
+	attemptTimeout := timeout.NewBuilder[PaymentResponse](cfg.AttemptTimeout).
+		OnTimeoutExceeded(func(e failsafe.ExecutionDoneEvent[PaymentResponse]) {
+			if cfg.Telemetry != nil {
+				cfg.Telemetry.RecordTimeout("payment_gateway_attempt", cfg.AttemptTimeout.Milliseconds())
+			}
+		}).
+		Build()
+
+	// Compose Outer to Inner: Fallback -> OverallOperationTimeout -> Retry -> CircuitBreaker -> AttemptTimeout
+	executor := failsafe.With(fallbackPolicy, operationTimeout, retryPol, cb, attemptTimeout)
 	return executor, cb
+}
+
+// InventoryPolicyConfig configures the operation timeout policy for Inventory row locking
+type InventoryPolicyConfig struct {
+	OperationTimeout time.Duration // 150ms budget ceiling
+	Telemetry        TelemetryRecorder
+}
+
+// DefaultInventoryPolicyConfig returns default inventory policy config
+func DefaultInventoryPolicyConfig(telemetry TelemetryRecorder) InventoryPolicyConfig {
+	return InventoryPolicyConfig{
+		OperationTimeout: 150 * time.Millisecond,
+		Telemetry:        telemetry,
+	}
+}
+
+// BuildInventoryExecutor constructs the Operation Timeout policy executor for Inventory
+func BuildInventoryExecutor(cfg InventoryPolicyConfig) failsafe.Executor[any] {
+	opTimeout := timeout.NewBuilder[any](cfg.OperationTimeout).
+		OnTimeoutExceeded(func(e failsafe.ExecutionDoneEvent[any]) {
+			if cfg.Telemetry != nil {
+				cfg.Telemetry.RecordTimeout("inventory_lock_operation", cfg.OperationTimeout.Milliseconds())
+			}
+		}).
+		Build()
+
+	return failsafe.With(opTimeout)
 }
 
 // FraudPolicyConfig configures the semi-critical ML fraud evaluation policy
 type FraudPolicyConfig struct {
-	Timeout   time.Duration
-	Telemetry TelemetryRecorder
+	OperationTimeout time.Duration // 100ms budget upper bound
+	Telemetry        TelemetryRecorder
+}
+
+// DefaultFraudPolicyConfig returns default fraud policy config
+func DefaultFraudPolicyConfig(telemetry TelemetryRecorder) FraudPolicyConfig {
+	return FraudPolicyConfig{
+		OperationTimeout: 100 * time.Millisecond,
+		Telemetry:        telemetry,
+	}
 }
 
 // BuildFraudExecutor constructs the bounded fallback executor for fraud checks
 func BuildFraudExecutor(cfg FraudPolicyConfig) failsafe.Executor[RiskScore] {
-	tOut := timeout.NewBuilder[RiskScore](cfg.Timeout).
+	tOut := timeout.NewBuilder[RiskScore](cfg.OperationTimeout).
 		OnTimeoutExceeded(func(e failsafe.ExecutionDoneEvent[RiskScore]) {
 			if cfg.Telemetry != nil {
-				cfg.Telemetry.RecordTimeout("fraud_service", cfg.Timeout.Milliseconds())
+				cfg.Telemetry.RecordTimeout("fraud_service_operation", cfg.OperationTimeout.Milliseconds())
 			}
 		}).
 		Build()
@@ -132,4 +178,23 @@ func BuildFraudExecutor(cfg FraudPolicyConfig) failsafe.Executor[RiskScore] {
 		Build()
 
 	return failsafe.With(fallbackPol, tOut)
+}
+
+// LoyaltyPolicyConfig configures the async loyalty accrual operation timeout
+type LoyaltyPolicyConfig struct {
+	OperationTimeout time.Duration // 200ms background budget
+	Telemetry        TelemetryRecorder
+}
+
+// BuildLoyaltyExecutor constructs the Operation Timeout executor for async loyalty
+func BuildLoyaltyExecutor(cfg LoyaltyPolicyConfig) failsafe.Executor[any] {
+	tOut := timeout.NewBuilder[any](cfg.OperationTimeout).
+		OnTimeoutExceeded(func(e failsafe.ExecutionDoneEvent[any]) {
+			if cfg.Telemetry != nil {
+				cfg.Telemetry.RecordTimeout("loyalty_operation", cfg.OperationTimeout.Milliseconds())
+			}
+		}).
+		Build()
+
+	return failsafe.With(tOut)
 }

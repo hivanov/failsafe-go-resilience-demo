@@ -34,15 +34,9 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			req: checkout.OrderRequest{
 				OrderID: "ORD-TEST-001", CustomerID: "CUST-1", ItemID: "sku-apple", Quantity: 2, Amount: 100.0, Currency: "EUR", Idempotency: "idem-1",
 			},
-			setupGateway: func(gw *downstream.SimulatedPaymentGateway) {
-				// Healthy
-			},
-			setupInventory: func(inv *downstream.ThreadSafeInventoryService) {
-				// Default 10 in stock
-			},
-			setupFraud: func(fr *downstream.SimulatedFraudService) {
-				// Fast approve
-			},
+			setupGateway:      func(gw *downstream.SimulatedPaymentGateway) {},
+			setupInventory:    func(inv *downstream.ThreadSafeInventoryService) {},
+			setupFraud:        func(fr *downstream.SimulatedFraudService) {},
 			expectedStatus:    "SUCCESS",
 			expectedDegraded:  false,
 			expectErr:         false,
@@ -175,12 +169,11 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			payCfg.BackoffMin = 10 * time.Millisecond
 			payCfg.BackoffMax = 30 * time.Millisecond
 
-			fraudCfg := checkout.FraudPolicyConfig{
-				Timeout:   100 * time.Millisecond,
-				Telemetry: telemetry,
-			}
+			invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
+			fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
+			loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-			orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, fraudCfg)
+			orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
 
 			res, err := orch.ProcessOrder(context.Background(), tc.req)
 
@@ -215,23 +208,23 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 	loyalty := downstream.NewLoyaltyService()
 
 	payCfg := checkout.PaymentPolicyConfig{
-		OverallTimeout: 200 * time.Millisecond,
-		MaxRetries:     1,
-		BackoffMin:     5 * time.Millisecond,
-		BackoffMax:     10 * time.Millisecond,
-		JitterFactor:   0.1,
-		CBThreshold:    2,
-		CBCapacity:     5,
-		CBDelay:        2 * time.Second,
-		Telemetry:      telemetry,
+		OverallOperationTimeout: 200 * time.Millisecond,
+		AttemptTimeout:          80 * time.Millisecond,
+		MaxRetries:              1,
+		BackoffMin:              5 * time.Millisecond,
+		BackoffMax:              10 * time.Millisecond,
+		JitterFactor:            0.1,
+		CBThreshold:             2,
+		CBCapacity:              5,
+		CBDelay:                 2 * time.Second,
+		Telemetry:               telemetry,
 	}
 
-	fraudCfg := checkout.FraudPolicyConfig{
-		Timeout:   50 * time.Millisecond,
-		Telemetry: telemetry,
-	}
+	invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
+	fraudCfg := checkout.FraudPolicyConfig{OperationTimeout: 50 * time.Millisecond, Telemetry: telemetry}
+	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 100 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, fraudCfg)
+	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
 
 	// Inject persistent errors to open circuit
 	gw.QueueFailures(
@@ -280,9 +273,11 @@ func TestConcurrency_Bulkhead_Isolation(t *testing.T) {
 	loyalty := downstream.NewLoyaltyService()
 
 	payCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
-	fraudCfg := checkout.FraudPolicyConfig{Timeout: 80 * time.Millisecond, Telemetry: telemetry}
+	invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
+	fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
+	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, fraudCfg)
+	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
 
 	const concurrency = 30
 	var wg sync.WaitGroup
@@ -326,9 +321,11 @@ func TestContext_Cancellation(t *testing.T) {
 	loyalty := downstream.NewLoyaltyService()
 
 	payCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
-	fraudCfg := checkout.FraudPolicyConfig{Timeout: 50 * time.Millisecond, Telemetry: telemetry}
+	invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
+	fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
+	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, fraudCfg)
+	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
