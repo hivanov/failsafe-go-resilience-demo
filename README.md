@@ -455,15 +455,50 @@ func (s *Orchestrator) rollback(ctx context.Context, executed []Step) {
 
 ---
 
-## 6. Interface Decoupling & Swappability
+## 6. Interface Decoupling & Resilient Decorator Architecture
 
-Every external dependency implements a distinct Go interface (`pkg/checkout/interfaces.go`):
+To keep the top-level `Orchestrator` clean, decoupled, and testable, all resilience policies (timeouts, retries, circuit breakers, fallbacks) are encapsulated inside dedicated **Decorator implementations** of the domain interfaces:
 
-- **`PaymentGateway`**: Interface for 3rd-party credit/debit charges.
-- **`InventoryService`**: Interface for checking, locking, and releasing warehouse inventory.
-- **`FraudService`**: Interface for ML risk evaluation and heuristic fallback.
-- **`LoyaltyService`**: Interface for asynchronous non-blocking rewards.
-- **`TelemetryRecorder`**: Interface for Prometheus metrics and OpenTelemetry span event hooks.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       DECORATOR ARCHITECTURE IN GO                          │
+│                                                                             │
+│  [ Raw HTTP/DB Service ]                                                    │
+│         │                                                                   │
+│         ▼                                                                   │
+│  [ Resilient Decorator Implementation ]                                     │
+│    ├── failsafe-go Policy Onion (Operation Timeout, Retries, CB, Fallback)  │
+│    └── Implements the clean domain interface (e.g. PaymentGateway)          │
+│         │                                                                   │
+│         ▼                                                                   │
+│  [ Clean Orchestrator ]                                                     │
+│    └── Focuses 100% on business workflow coordination (Zero failsafe clutter)│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Resilient Decorator Wrappers:
+1. **`ResilientPaymentGateway`** (implements `PaymentGateway`): Encapsulates the 5-layer Policy Onion (Fallback $\rightarrow$ 400ms Overall Timeout $\rightarrow$ Retries w/ Jitter $\rightarrow$ Circuit Breaker $\rightarrow$ 150ms Attempt Timeout).
+2. **`ResilientInventoryService`** (implements `InventoryService`): Encapsulates the 150ms database row-locking Operation Timeout.
+3. **`ResilientFraudService`** (implements `FraudService`): Encapsulates the 100ms ML evaluation Operation Timeout and graceful heuristic fallback.
+4. **`ResilientLoyaltyService`** (implements `LoyaltyService`): Encapsulates the 200ms background reward accrual Operation Timeout.
+
+### Composition in Main / Setup:
+```go
+// 1. Raw infrastructure drivers
+rawPay := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
+rawInv := downstream.NewInventoryService(initialStock, 20 * time.Millisecond)
+rawFraud := downstream.NewFraudService(30 * time.Millisecond)
+rawLoyalty := downstream.NewLoyaltyService()
+
+// 2. Decorate with resilient policy implementations
+resilientPay := checkout.NewResilientPaymentGateway(rawPay, payPolicyCfg)
+resilientInv := checkout.NewResilientInventoryService(rawInv, invPolicyCfg)
+resilientFraud := checkout.NewResilientFraudService(rawFraud, fraudPolicyCfg)
+resilientLoyalty := checkout.NewResilientLoyaltyService(rawLoyalty, loyaltyPolicyCfg)
+
+// 3. Inject into Orchestrator (Orchestrator remains ultra-clean)
+orchestrator := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
+```
 
 ---
 

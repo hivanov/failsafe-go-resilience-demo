@@ -177,6 +177,9 @@ type PaymentResponse struct {
 
 	// ProcessedAt records the gateway settlement timestamp.
 	ProcessedAt time.Time
+
+	// Attempts records the number of gateway execution attempts.
+	Attempts int
 }
 
 // RiskScore represents the evaluation output from the fraud analysis service.

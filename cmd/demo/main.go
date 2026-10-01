@@ -64,12 +64,18 @@ func main() {
 	// SCENARIO 1: Happy Path
 	// -------------------------------------------------------------------------
 	printHeader("SCENARIO 1: Happy Path Execution (Healthy Dependencies)")
-	payGateway1 := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
-	inventory1 := downstream.NewInventoryService(map[string]int{"item_sku_101": 50}, 20*time.Millisecond)
-	fraud1 := downstream.NewFraudService(30 * time.Millisecond)
-	loyalty1 := downstream.NewLoyaltyService()
+	rawGateway1 := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
+	rawInventory1 := downstream.NewInventoryService(map[string]int{"item_sku_101": 50}, 20*time.Millisecond)
+	rawFraud1 := downstream.NewFraudService(30 * time.Millisecond)
+	rawLoyalty1 := downstream.NewLoyaltyService()
 
-	orch1 := checkout.NewOrchestrator(payGateway1, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
+	// Decorate raw dependencies with resilient policy implementations
+	pay1 := checkout.NewResilientPaymentGateway(rawGateway1, payPolicyCfg)
+	inv1 := checkout.NewResilientInventoryService(rawInventory1, invPolicyCfg)
+	fraud1 := checkout.NewResilientFraudService(rawFraud1, fraudPolicyCfg)
+	loyalty1 := checkout.NewResilientLoyaltyService(rawLoyalty1, loyaltyPolicyCfg)
+
+	orch1 := checkout.NewOrchestrator(pay1, inv1, fraud1, loyalty1, telemetry)
 
 	req1 := checkout.OrderRequest{
 		OrderID:     "ORD-2026-001",
@@ -88,10 +94,11 @@ func main() {
 	// SCENARIO 2: Transient 3rd-Party Glitch (Retry with Exponential Backoff + Jitter)
 	// -------------------------------------------------------------------------
 	printHeader("SCENARIO 2: Transient Glitch (Attempt 1 fails 503 -> Retry 2 succeeds)")
-	payGateway2 := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
-	payGateway2.QueueFailures(checkout.ErrGatewayUnavailable) // 1st attempt fails
+	rawGateway2 := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
+	rawGateway2.QueueFailures(checkout.ErrGatewayUnavailable) // 1st attempt fails
 
-	orch2 := checkout.NewOrchestrator(payGateway2, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
+	pay2 := checkout.NewResilientPaymentGateway(rawGateway2, payPolicyCfg)
+	orch2 := checkout.NewOrchestrator(pay2, inv1, fraud1, loyalty1, telemetry)
 
 	req2 := checkout.OrderRequest{
 		OrderID:     "ORD-2026-002",
@@ -110,12 +117,13 @@ func main() {
 	// SCENARIO 3: Downstream Total Outage & Circuit Breaker Trip + Graceful Fallback
 	// -------------------------------------------------------------------------
 	printHeader("SCENARIO 3: Outage -> Circuit Breaker Opens -> Fast-Fail to Fallback")
-	payGateway3 := downstream.NewSimulatedPaymentGateway(50 * time.Millisecond)
+	rawGateway3 := downstream.NewSimulatedPaymentGateway(50 * time.Millisecond)
 	for i := 0; i < 10; i++ {
-		payGateway3.QueueFailures(checkout.ErrGatewayUnavailable)
+		rawGateway3.QueueFailures(checkout.ErrGatewayUnavailable)
 	}
 
-	orch3 := checkout.NewOrchestrator(payGateway3, inventory1, fraud1, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
+	pay3 := checkout.NewResilientPaymentGateway(rawGateway3, payPolicyCfg)
+	orch3 := checkout.NewOrchestrator(pay3, inv1, fraud1, loyalty1, telemetry)
 
 	for i := 1; i <= 4; i++ {
 		req := checkout.OrderRequest{
@@ -127,7 +135,7 @@ func main() {
 			Currency:    "EUR",
 			Idempotency: fmt.Sprintf("idem-cb-%d", i),
 		}
-		fmt.Printf("\n%s--> Dispatching Request %d [CB State: %s]...%s\n", ColorMagenta, i, orch3.CircuitBreaker().State().String(), ColorReset)
+		fmt.Printf("\n%s--> Dispatching Request %d [CB State: %s]...%s\n", ColorMagenta, i, pay3.CircuitBreaker().State().String(), ColorReset)
 		res, err := orch3.ProcessOrder(context.Background(), req)
 		printResult(res, err)
 	}
@@ -136,10 +144,12 @@ func main() {
 	// SCENARIO 4: Semi-Critical Fraud Check Timeout -> Degrades to Rule Heuristics
 	// -------------------------------------------------------------------------
 	printHeader("SCENARIO 4: ML Fraud Model Latency Spike -> 100ms Timeout Fallback")
-	payGateway4 := downstream.NewSimulatedPaymentGateway(50 * time.Millisecond)
-	fraud4 := downstream.NewFraudService(300 * time.Millisecond) // ML model hangs for 300ms (> 100ms budget)
+	rawGateway4 := downstream.NewSimulatedPaymentGateway(50 * time.Millisecond)
+	rawFraud4 := downstream.NewFraudService(300 * time.Millisecond) // ML model hangs for 300ms (> 100ms budget)
 
-	orch4 := checkout.NewOrchestrator(payGateway4, inventory1, fraud4, loyalty1, telemetry, payPolicyCfg, invPolicyCfg, fraudPolicyCfg, loyaltyPolicyCfg)
+	pay4 := checkout.NewResilientPaymentGateway(rawGateway4, payPolicyCfg)
+	fraud4 := checkout.NewResilientFraudService(rawFraud4, fraudPolicyCfg)
+	orch4 := checkout.NewOrchestrator(pay4, inv1, fraud4, loyalty1, telemetry)
 
 	req4 := checkout.OrderRequest{
 		OrderID:     "ORD-2026-004",
@@ -168,5 +178,6 @@ func main() {
 			fmt.Printf("  [%02d] %s\n", idx+1, evt)
 		}
 	}
-	fmt.Printf("\n%s%sDemo execution completed successfully.%s\n\n", ColorBold, ColorGreen, ColorReset)
+
+	fmt.Printf("\n%sDemo execution completed successfully.%s\n", ColorGreen, ColorReset)
 }

@@ -89,7 +89,12 @@ func TestPostgres_Integration(t *testing.T) {
 	fraudPolicy := checkout.DefaultFraudPolicyConfig(telemetry)
 	loyaltyPolicy := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(payGateway, pgInv, fraudSvc, loyaltySvc, telemetry, payPolicy, invPolicy, fraudPolicy, loyaltyPolicy)
+	resilientPay := checkout.NewResilientPaymentGateway(payGateway, payPolicy)
+	resilientInv := checkout.NewResilientInventoryService(pgInv, invPolicy)
+	resilientFraud := checkout.NewResilientFraudService(fraudSvc, fraudPolicy)
+	resilientLoyalty := checkout.NewResilientLoyaltyService(loyaltySvc, loyaltyPolicy)
+
+	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
 	// -------------------------------------------------------------------------
 	// 1. Happy Path: Purchase 2 units -> Stock must be exactly 8 in Postgres

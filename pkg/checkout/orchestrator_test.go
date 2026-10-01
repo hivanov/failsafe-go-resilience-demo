@@ -173,7 +173,13 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
 			loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-			orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
+			// Wrap interfaces in their respective resilient policy implementations
+			resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
+			resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
+			resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
+			resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+
+			orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
 			res, err := orch.ProcessOrder(context.Background(), tc.req)
 
@@ -224,7 +230,12 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 	fraudCfg := checkout.FraudPolicyConfig{OperationTimeout: 50 * time.Millisecond, Telemetry: telemetry}
 	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 100 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
+	resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
+	resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
+	resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
+	resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+
+	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
 	// Inject persistent errors to open circuit
 	gw.QueueFailures(
@@ -259,8 +270,8 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 		t.Errorf("circuit breaker failed to fast-fail: gateway calls increased from %d to %d", callsAfterTrip, gw.TotalCalls())
 	}
 
-	if orch.CircuitBreaker().State() != circuitbreaker.OpenState {
-		t.Errorf("expected circuit breaker state OPEN, got %v", orch.CircuitBreaker().State())
+	if resilientPay.CircuitBreaker().State() != circuitbreaker.OpenState {
+		t.Errorf("expected circuit breaker state OPEN, got %v", resilientPay.CircuitBreaker().State())
 	}
 }
 
@@ -277,7 +288,12 @@ func TestConcurrency_Bulkhead_Isolation(t *testing.T) {
 	fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
 	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
+	resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
+	resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
+	resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
+	resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+
+	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
 	const concurrency = 30
 	var wg sync.WaitGroup
@@ -325,7 +341,12 @@ func TestContext_Cancellation(t *testing.T) {
 	fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
 	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	orch := checkout.NewOrchestrator(gw, inv, fr, loyalty, telemetry, payCfg, invCfg, fraudCfg, loyaltyCfg)
+	resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
+	resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
+	resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
+	resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+
+	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()

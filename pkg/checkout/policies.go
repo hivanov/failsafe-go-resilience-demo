@@ -1,6 +1,7 @@
 package checkout
 
 import (
+	"context"
 	"time"
 
 	"github.com/failsafe-go/failsafe-go"
@@ -141,6 +142,38 @@ func BuildPaymentExecutor(cfg PaymentPolicyConfig) (failsafe.Executor[PaymentRes
 	return executor, cb
 }
 
+// ResilientPaymentGateway wraps any PaymentGateway implementation with the failsafe-go Policy Onion:
+// Fallback -> OverallOperationTimeout -> RetryPolicy -> CircuitBreaker -> AttemptTimeout.
+type ResilientPaymentGateway struct {
+	inner          PaymentGateway
+	executor       failsafe.Executor[PaymentResponse]
+	circuitBreaker circuitbreaker.CircuitBreaker[PaymentResponse]
+}
+
+// NewResilientPaymentGateway wraps an underlying PaymentGateway with production-grade failsafe-go resilience policies.
+func NewResilientPaymentGateway(inner PaymentGateway, cfg PaymentPolicyConfig) *ResilientPaymentGateway {
+	executor, cb := BuildPaymentExecutor(cfg)
+	return &ResilientPaymentGateway{
+		inner:          inner,
+		executor:       executor,
+		circuitBreaker: cb,
+	}
+}
+
+// Charge executes the payment request through the multi-policy resilience pipeline.
+func (g *ResilientPaymentGateway) Charge(ctx context.Context, req PaymentRequest) (PaymentResponse, error) {
+	return g.executor.WithContext(ctx).GetWithExecution(func(exec failsafe.Execution[PaymentResponse]) (PaymentResponse, error) {
+		resp, err := g.inner.Charge(exec.Context(), req)
+		resp.Attempts = exec.Attempts()
+		return resp, err
+	})
+}
+
+// CircuitBreaker returns the underlying circuit breaker for health and state inspection.
+func (g *ResilientPaymentGateway) CircuitBreaker() circuitbreaker.CircuitBreaker[PaymentResponse] {
+	return g.circuitBreaker
+}
+
 // InventoryPolicyConfig configures the operation timeout policy for Inventory row locking.
 type InventoryPolicyConfig struct {
 	// OperationTimeout sets the maximum time allowed to acquire a database lock.
@@ -169,6 +202,32 @@ func BuildInventoryExecutor(cfg InventoryPolicyConfig) failsafe.Executor[any] {
 		Build()
 
 	return failsafe.With(opTimeout)
+}
+
+// ResilientInventoryService wraps any InventoryService implementation with an explicit Operation Timeout policy.
+type ResilientInventoryService struct {
+	inner    InventoryService
+	executor failsafe.Executor[any]
+}
+
+// NewResilientInventoryService wraps an InventoryService with an Operation Timeout.
+func NewResilientInventoryService(inner InventoryService, cfg InventoryPolicyConfig) *ResilientInventoryService {
+	return &ResilientInventoryService{
+		inner:    inner,
+		executor: BuildInventoryExecutor(cfg),
+	}
+}
+
+// LockInventory executes lock acquisition bounded by the operation timeout policy.
+func (s *ResilientInventoryService) LockInventory(ctx context.Context, itemID string, quantity int) error {
+	return s.executor.WithContext(ctx).RunWithExecution(func(exec failsafe.Execution[any]) error {
+		return s.inner.LockInventory(exec.Context(), itemID, quantity)
+	})
+}
+
+// ReleaseInventory passes through directly to the underlying service implementation.
+func (s *ResilientInventoryService) ReleaseInventory(ctx context.Context, itemID string, quantity int) error {
+	return s.inner.ReleaseInventory(ctx, itemID, quantity)
 }
 
 // FraudPolicyConfig configures the operation timeout and fallback rules for ML fraud evaluation.
@@ -216,6 +275,27 @@ func BuildFraudExecutor(cfg FraudPolicyConfig) failsafe.Executor[RiskScore] {
 	return failsafe.With(fallbackPol, tOut)
 }
 
+// ResilientFraudService wraps any FraudService implementation with an Operation Timeout and heuristic fallback policy.
+type ResilientFraudService struct {
+	inner    FraudService
+	executor failsafe.Executor[RiskScore]
+}
+
+// NewResilientFraudService wraps a FraudService with timeout and fallback policies.
+func NewResilientFraudService(inner FraudService, cfg FraudPolicyConfig) *ResilientFraudService {
+	return &ResilientFraudService{
+		inner:    inner,
+		executor: BuildFraudExecutor(cfg),
+	}
+}
+
+// EvaluateRisk executes ML fraud scoring, degrading to heuristic rules if the operation times out.
+func (s *ResilientFraudService) EvaluateRisk(ctx context.Context, req OrderRequest) (RiskScore, error) {
+	return s.executor.WithContext(ctx).GetWithExecution(func(exec failsafe.Execution[RiskScore]) (RiskScore, error) {
+		return s.inner.EvaluateRisk(exec.Context(), req)
+	})
+}
+
 // LoyaltyPolicyConfig configures the Operation Timeout for asynchronous background loyalty accrual.
 type LoyaltyPolicyConfig struct {
 	// OperationTimeout sets the maximum budget for async point calculations.
@@ -236,4 +316,25 @@ func BuildLoyaltyExecutor(cfg LoyaltyPolicyConfig) failsafe.Executor[any] {
 		Build()
 
 	return failsafe.With(tOut)
+}
+
+// ResilientLoyaltyService wraps any LoyaltyService implementation with an async Operation Timeout policy.
+type ResilientLoyaltyService struct {
+	inner    LoyaltyService
+	executor failsafe.Executor[any]
+}
+
+// NewResilientLoyaltyService wraps a LoyaltyService with an Operation Timeout.
+func NewResilientLoyaltyService(inner LoyaltyService, cfg LoyaltyPolicyConfig) *ResilientLoyaltyService {
+	return &ResilientLoyaltyService{
+		inner:    inner,
+		executor: BuildLoyaltyExecutor(cfg),
+	}
+}
+
+// AccruePoints executes reward accrual bounded by the operation timeout.
+func (s *ResilientLoyaltyService) AccruePoints(ctx context.Context, customerID string, amount float64) error {
+	return s.executor.WithContext(ctx).RunWithExecution(func(exec failsafe.Execution[any]) error {
+		return s.inner.AccruePoints(exec.Context(), customerID, amount)
+	})
 }
