@@ -13,12 +13,13 @@ Building resilient software in Go requires understanding not just how to configu
 - [5. Inadequate Testing: Mock-Driven Illusion vs. Real Infrastructure](#5-inadequate-testing-mock-driven-illusion-vs-real-infrastructure)
 - [6. Lack of Real-World Observations (Designing in a Telemetry Vacuum)](#6-lack-of-real-world-observations-designing-in-a-telemetry-vacuum)
 - [7. Lack of Business Awareness (Building for Incorrect Scenarios & Load Profiles)](#7-lack-of-business-awareness-building-for-incorrect-scenarios--load-profiles)
-- [8. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)](#8-lack-of-alternative-strategies-binary-success-or-fail-thinking)
-- [9. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps](#9-ignoring-the-critical-path--over-optimizing-non-critical-steps)
-- [10. Basing Policies on "Hunches" Instead of Empirical SLAs](#10-basing-policies-on-hunches-instead-of-empirical-slas)
-- [11. Context Disconnection & Socket Leaking](#11-context-disconnection--socket-leaking)
-- [12. Blind / Catch-All Error Retries (Retrying Deterministic Failures)](#12-blind--catch-all-error-retries-retrying-deterministic-failures)
-- [13. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)](#13-cascading-circuit-breaker-trips-shared-breakers-across-disparate-endpoints)
+- [8. Over-Engineering SLA Requirements (The "Five-Nines" Fantasy)](#8-over-engineering-sla-requirements-the-five-nines-fantasy)
+- [9. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)](#9-lack-of-alternative-strategies-binary-success-or-fail-thinking)
+- [10. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps](#10-ignoring-the-critical-path--over-optimizing-non-critical-steps)
+- [11. Basing Policies on "Hunches" Instead of Empirical SLAs](#11-basing-policies-on-hunches-instead-of-empirical-slas)
+- [12. Context Disconnection & Socket Leaking](#12-context-disconnection--socket-leaking)
+- [13. Blind / Catch-All Error Retries (Retrying Deterministic Failures)](#13-blind--catch-all-error-retries-retrying-deterministic-failures)
+- [14. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)](#14-cascading-circuit-breaker-trips-shared-breakers-across-disparate-endpoints)
 
 ---
 
@@ -110,7 +111,18 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 8. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)
+## 8. Over-Engineering SLA Requirements (The "Five-Nines" Fantasy)
+- **The Anti-Pattern:** Demanding $99.999\%$ ("five nines" = $\le 5.26\text{ minutes}$ downtime/year) or $99.9999\%$ availability for a monthly batch billing process, or demanding five-nines on top of underlying cloud components (e.g. AWS ALB + RDS) with a composite infrastructure SLA of $99.95\%$.
+- **The Mathematical Reality of Serial Availability:** A system's composite uptime is bounded by the product of its serial dependencies:
+  $$A_{\text{total}} = A_{\text{cloud}} \times A_{\text{database}} \times A_{\text{gateway}} = 0.9995 \times 0.9995 \times 0.999 = 99.8\%$$
+  Attempting to achieve 99.999% on top of 99.9% dependencies requires multi-region, multi-cloud active-active infrastructure, consensus quorums, and dedicated SRE teams—multiplying development and operational costs by $20\times$ to $50\times$ for zero tangible business value.
+- **The Failure Mode:** Exhausting engineering budgets, adding extreme operational fragility, and creating burnout chasing uptime metrics that the business model does not require.
+- **Remediation:** Establish pragmatic Service Level Objectives (SLOs) tied to real business impact. Use error budgets to balance feature velocity with operational stability.
+- **Code Reference:** See [`doc/operational_resilience_and_support_processes.md`](./operational_resilience_and_support_processes.md).
+
+---
+
+## 9. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)
 - **The Anti-Pattern:** Treating every dependency as binary: either it succeeds with 100% fidelity or the entire user request throws a 500 Internal Server Error.
 - **The Failure Mode:** When a soft dependency (like an ML fraud scoring service, recommendation widget, or loyalty reward ledger) experiences a slow path, the entire critical checkout pipeline fails, leading to lost revenue and frustrated users.
 - **Remediation:** Classify dependencies by business criticality. Equip all soft and semi-critical dependencies with **Fallback Policies**:
@@ -121,7 +133,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 9. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps
+## 10. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps
 - **The Anti-Pattern:** Spending engineering time tuning retries on non-critical analytics or email dispatchers while leaving the core database lock and payment gateway unbudgeted.
 - **The Failure Mode:** The user-facing latency budget is consumed by the wrong activities. Slow critical operations breach SLA while background work monopolizes worker resources.
 - **Remediation:** Map the end-to-end request timeline. Identify the sequential **Critical Path** (e.g. Ingress $\rightarrow$ Fraud $\rightarrow$ Inventory DB Lock $\rightarrow$ Payment Charge). Allocate explicit time slices to each critical step. Move all non-critical work (e.g. Loyalty point calculation, email notification) off the critical path into asynchronous background goroutines bounded by separate contexts.
@@ -129,7 +141,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 10. Basing Policies on "Hunches" Instead of Empirical SLAs
+## 11. Basing Policies on "Hunches" Instead of Empirical SLAs
 - **The Anti-Pattern:** Picking arbitrary timeout and retry numbers (e.g. "let's set a 5-second timeout and 5 retries") without analyzing real telemetry or upstream SLA contracts.
 - **The Failure Mode:**
   - *Timeout < P95 Latency:* If a downstream database query has a legitimate P95 latency of 300ms, setting a hunch-based timeout of 200ms causes a **self-inflicted outage** where 5% of healthy requests are aggressively aborted.
@@ -139,7 +151,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 11. Context Disconnection & Socket Leaking
+## 12. Context Disconnection & Socket Leaking
 - **The Anti-Pattern:** Declaring failsafe timeout policies but failing to pass `exec.Context()` to the underlying `http.Client` or `database/sql` driver.
 - **The Failure Mode:** When the failsafe timeout fires, the orchestrator proceeds, but the background goroutine and network socket continue running in the background until the OS TCP timeout (often 2 minutes). Under high concurrency, connection pools and file descriptors become saturated, leading to **silent server death**.
 - **Remediation:** Always pass `exec.Context()` down the entire call stack and use `http.NewRequestWithContext` or `QueryContext`/`ExecContext`.
@@ -147,7 +159,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 12. Blind / Catch-All Error Retries (Retrying Deterministic Failures)
+## 13. Blind / Catch-All Error Retries (Retrying Deterministic Failures)
 - **The Anti-Pattern:** Retrying on *any* error (`HandleErrors(err)` or catching all HTTP non-200 responses).
 - **The Failure Mode:** Retrying deterministic 4xx client errors (e.g., `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `422 Unprocessable Entity`, invalid credit card number). These errors will **never** succeed on retry; retrying them only wastes CPU, consumes bandwidth, and slows down the client response.
 - **Remediation:** Only retry **transient, recoverable errors** (e.g. `503 Service Unavailable`, `429 Too Many Requests`, temporary network drops, connection resets).
@@ -155,7 +167,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 13. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)
+## 14. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)
 - **The Anti-Pattern:** Using a single global circuit breaker instance to protect calls to multiple distinct external APIs or database tables.
 - **The Failure Mode:** If an optional reporting endpoint goes down, the shared circuit breaker trips to `OPEN`, inadvertently taking down the critical payment processing pipeline with it.
 - **Remediation:** Isolate circuit breakers per failure domain, per endpoint, or per microservice interface.

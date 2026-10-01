@@ -104,7 +104,8 @@ failsafe-go-demo/
 └── doc/                             # In-depth architectural documentation
     ├── README.md                    # Deep-dive documentation index & TOC
     ├── design_process_and_modularity.md # 80/20 rule, 6-phase design cycle & Go modularity
-    ├── anti_patterns.md             # Detailed guide on 10 resilience anti-patterns
+    ├── anti_patterns.md             # Detailed guide on 14 resilience anti-patterns
+    ├── operational_resilience_and_support_processes.md # Support operations, alerts, runbooks & GameDays
     ├── acid_monolith_architecture.md# Single ACID database architecture & trade-offs
     ├── distributed_transactions_sagas.md # Sagas, 2PC, rollbacks, and outbox patterns
     ├── context_cancellation_best_practices.md # Go context & socket leak rules
@@ -124,11 +125,12 @@ failsafe-go-demo/
 All comprehensive deep-dive guides, distributed transaction strategies, database architecture trade-offs, resilience engineering methodologies, and curated literature references are indexed in **[`doc/README.md`](doc/README.md)**:
 
 - 📖 **[Resilience Design Process & Modularity Principles in Go](doc/design_process_and_modularity.md)** — The 80/20 Pareto rule in resilience engineering; The 6-phase iterative design cycle; Interface segregation and decorator modularity in Go.
-- 📖 **[Architectural Anti-Patterns in Resilient System Design](doc/anti_patterns.md)** — Breakdown of 10 fatal anti-patterns (unbounded retries, missing jitter, retrying non-idempotent calls, hunch-based timeouts, context disconnection, cascading shared circuit breakers).
+- 📖 **[Architectural Anti-Patterns in Resilient System Design](doc/anti_patterns.md)** — Breakdown of 14 fatal anti-patterns (unbounded retries, missing jitter, non-idempotent retries, locks & deadlocks, inadequate testing, five-nines fantasy, hunch-based timeouts, context disconnection, cascading shared circuit breakers).
+- 📖 **[Coupling Software Resilience with Operational Support Processes](doc/operational_resilience_and_support_processes.md)** — Safe-to-Fail mindset; On-call ownership; Symptom-based alert hygiene; Progressive remediation (Manual Runbooks $\rightarrow$ GameDays $\rightarrow$ Automated Self-Healing).
 - 📖 **[Single-Database ACID Architecture vs. Distributed Microservices](doc/acid_monolith_architecture.md)** — Why single-database relational architectures win at moderate scale (< 500k DAU) with instant zero-code rollbacks (`ROLLBACK`) and kernel-level locking.
 - 📖 **[Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks](doc/distributed_transactions_sagas.md)** — Sagas vs. 2PC, Forward ($T_i$) vs. Compensating ($C_i$) actions, Transactional Outbox pattern, and distributed rollback rules.
 - 📖 **[Context Propagation & Socket Leak Prevention in Go](doc/context_cancellation_best_practices.md)** — How `exec.Context()` bridges `failsafe-go` policies to network sockets and prevents silent server resource leaks.
-- 📖 **[Further Reading, Bibliography & Historical Media](doc/further_reading_and_bibliography.md)** — Master bibliography (*Release It!*, *DDIA*, *Microservices Patterns*); Historical conference talks (Jesse Robbins: *Operations at Web Scale*, *GameDay: Master of Disaster*; John Allspaw); Repeatable testing methodologies (Testcontainers, virtual clocks `clockwork`, deterministic PRNG jitter seeding).
+- 📖 **[Further Reading, Bibliography & Historical Media](doc/further_reading_and_bibliography.md)** — Master bibliography (Nygard, Kleppmann, Tanenbaum, TailoredRead, Richardson); Historical conference talks (Jesse Robbins: *Operations at Web Scale*, *GameDay: Master of Disaster*; John Allspaw); Repeatable testing methodologies (Testcontainers, virtual clocks `clockwork`, deterministic PRNG jitter seeding).
 
 ---
 
