@@ -4,6 +4,21 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
+## Table of Contents
+
+- [1. Unbounded Retries (The Infinite Retry Loop)](#1-unbounded-retries-the-infinite-retry-loop)
+- [2. Retries Without Jitter (The Thundering Herd / Synchronized Stampede)](#2-retries-without-jitter-the-thundering-herd--synchronized-stampede)
+- [3. Retrying Non-Idempotent Operations (The Double-Charge Disaster)](#3-retrying-non-idempotent-operations-the-double-charge-disaster)
+- [4. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)](#4-lack-of-alternative-strategies-binary-success-or-fail-thinking)
+- [5. Untested Policy Code (Resilience as "Wishful Thinking")](#5-untested-policy-code-resilience-as-wishful-thinking)
+- [6. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps](#6-ignoring-the-critical-path--over-optimizing-non-critical-steps)
+- [7. Basing Policies on "Hunches" Instead of Observability & Metrics](#7-basing-policies-on-hunches-instead-of-observability--metrics)
+- [8. Context Disconnection & Socket Leaking](#8-context-disconnection--socket-leaking)
+- [9. Blind / Catch-All Error Retries (Retrying Deterministic Failures)](#9-blind--catch-all-error-retries-retrying-deterministic-failures)
+- [10. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)](#10-cascading-circuit-breaker-trips-shared-breakers-across-disparate-endpoints)
+
+---
+
 ## 1. Unbounded Retries (The Infinite Retry Loop)
 - **The Anti-Pattern:** Retrying a failing call indefinitely (`WithMaxRetries(-1)` or an excessive count like 20) under the assumption that "it will eventually succeed."
 - **The Failure Mode:** When a downstream service suffers an outage or severe degradation, infinite retry loops tie up caller goroutines, hold open file descriptors and TCP sockets, and multiply traffic by orders of magnitude. This turns a minor downstream hiccup into a **catastrophic cascading failure** that crashes the caller binary.

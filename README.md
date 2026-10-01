@@ -6,6 +6,20 @@ This repository contains a production-grade demonstration, parameterized test su
 
 ---
 
+## Table of Contents
+
+- [1. Architectural Case Study: "Checkout Orchestrator"](#1-architectural-case-study-checkout-orchestrator)
+  - [Dependency Classification & Time Budget Allocation](#dependency-classification--time-budget-allocation)
+- [2. Policy Composition (The Execution Onion)](#2-policy-composition-the-execution-onion)
+- [3. Package Structure & Resilient Decorator Architecture](#3-package-structure--resilient-decorator-architecture)
+  - [Key Source References](#key-source-references)
+- [4. Architectural Deep Dives & Further Reading](#4-architectural-deep-dives--further-reading)
+- [5. Running the Interactive Demo](#5-running-the-interactive-demo)
+  - [Live Scenarios Demonstrated](#live-scenarios-demonstrated)
+- [6. Running the Parameterized & Testcontainers Test Suite](#6-running-the-parameterized--testcontainers-test-suite)
+
+---
+
 ## 1. Architectural Case Study: "Checkout Orchestrator"
 
 - **Business SLA Contract:** Total HTTP round-trip **< 800ms** at **99.9%** availability.
@@ -53,7 +67,8 @@ In `failsafe-go`, policies wrap from **Outer to Inner**:
 │  │  │  │  │  └─────────────────────────────────────┘  │││││
 │  │  │  │  └───────────────────────────────────────────┘││││
 │  │  │  └───────────────────────────────────────────────┘│││
-│  └───────────────────────────────────────────────────┘││
+│  │  └───────────────────────────────────────────────────┘││
+│  └───────────────────────────────────────────────────────┘│
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -95,66 +110,25 @@ failsafe-go-demo/
 ```
 
 ### Key Source References:
-- **Resilient Decorator Implementations:** [`pkg/policies/payment_policy.go`](pkg/policies/payment_policy.go), [`pkg/policies/inventory_policy.go`](pkg/policies/inventory_policy.go), [`pkg/policies/fraud_policy.go`](pkg/policies/fraud_policy.go), [`pkg/policies/loyalty_policy.go`](pkg/policies/loyalty_policy.go).
+- **Resilient Decorators:** [`pkg/policies/payment_policy.go`](pkg/policies/payment_policy.go), [`pkg/policies/inventory_policy.go`](pkg/policies/inventory_policy.go), [`pkg/policies/fraud_policy.go`](pkg/policies/fraud_policy.go), [`pkg/policies/loyalty_policy.go`](pkg/policies/loyalty_policy.go).
 - **Domain Orchestrator:** [`pkg/checkout/orchestrator.go`](pkg/checkout/orchestrator.go) (cleanly delegates resilience to injected decorators).
 - **Strongly-Typed Domain Models & Enums:** [`pkg/checkout/models.go`](pkg/checkout/models.go) (`OrderStatus`, `PaymentStatus`, `RiskDecision`).
 - **Composition Root:** [`cmd/demo/main.go`](cmd/demo/main.go).
 
 ---
 
-## 4. Common Anti-Patterns in Resilient System Design
+## 4. Architectural Deep Dives & Further Reading
 
-*(For comprehensive architectural analysis, see [`doc/anti_patterns.md`](doc/anti_patterns.md))*
+All comprehensive deep-dive guides, distributed transaction strategies, database architecture trade-offs, and resilience anti-patterns are indexed in **[`doc/README.md`](doc/README.md)**:
 
-1. **Unbounded Retries (The Infinite Retry Loop):**
-   - *Anti-Pattern:* Retrying forever or setting excessively high retry counts.
-   - *Impact:* Saturated connection pools, locked goroutines, and cascading server crashes.
-   - *Fix:* Cap retries to 1–3 attempts max and wrap them inside an `OverallOperationTimeout` policy ([`pkg/policies/payment_policy.go`](pkg/policies/payment_policy.go)).
-2. **Retries Without Jitter (The Thundering Herd):**
-   - *Anti-Pattern:* Deterministic backoff intervals without randomized variance.
-   - *Impact:* Thousands of clients retry simultaneously, sending shock waves that knock recovering services offline.
-   - *Fix:* Always apply randomized jitter (`WithJitterFactor(0.2)`).
-3. **Retrying Non-Idempotent Operations (The Double-Charge Bug):**
-   - *Anti-Pattern:* Blindly retrying mutating operations (`POST /charges`) on network timeout.
-   - *Idempotency Defined:* An operation is idempotent if $f(f(x)) = f(x)$ (multiple applications yield the exact same state as one).
-   - *Impact:* Network timeouts are ambiguous (the server may have processed the charge before dropping the packet). Retrying without idempotency keys causes double-charging.
-   - *Fix:* Require unique client idempotency keys ([`pkg/checkout/models.go`](pkg/checkout/models.go)) deduplicated by the server.
-4. **Lack of Alternative Strategies (No Fallback):**
-   - *Anti-Pattern:* Failing the entire user request when a non-critical dependency slows down.
-   - *Fix:* Implement graceful fallbacks (e.g., ML timeout degrading to rule heuristics in [`pkg/policies/fraud_policy.go`](pkg/policies/fraud_policy.go) or routing failed payments to a manual review queue).
-5. **Untested Policy Code ("Wishful Thinking"):**
-   - *Anti-Pattern:* Declaring policies without rigorous fault-injection tests.
-   - *Fix:* Validate under `-race` with table-driven tests ([`pkg/checkout/orchestrator_test.go`](pkg/checkout/orchestrator_test.go)) and live containers ([`pkg/checkout/postgres_integration_test.go`](pkg/checkout/postgres_integration_test.go)).
-6. **Ignoring the Critical Path:**
-   - *Anti-Pattern:* Tuning retries on background tasks while leaving core database locks and payment calls unbudgeted.
-   - *Fix:* Map the critical path, allocate strict budgets to hard dependencies, and move non-critical tasks (e.g. loyalty accrual) off the critical path.
-7. **Basing Policies on "Hunches" Instead of Observability:**
-   - *Anti-Pattern:* Guessing timeouts instead of measuring P95/P99 latency histograms. Setting a timeout below P95 causes a self-inflicted outage.
-   - *Fix:* Drive timeout and retry thresholds using real telemetry ([`pkg/checkout/telemetry.go`](pkg/checkout/telemetry.go)).
-8. **Context Disconnection & Socket Leaking:**
-   - *Anti-Pattern:* Declaring timeout policies without passing `exec.Context()` to `http.Client` or database drivers.
-   - *Fix:* Strictly propagate `exec.Context()` to terminate active TCP sockets immediately on cancellation ([`doc/context_cancellation_best_practices.md`](doc/context_cancellation_best_practices.md)).
-9. **Blind / Catch-All Error Retries:**
-   - *Anti-Pattern:* Retrying deterministic client errors (`400 Bad Request`, `401 Unauthorized`, `404 Not Found`).
-   - *Fix:* Only retry transient, recoverable errors (`503 Service Unavailable`, `429 Too Many Requests`, socket drops).
-10. **Cascading Shared Circuit Breakers:**
-    - *Anti-Pattern:* Reusing a single circuit breaker across multiple distinct downstream endpoints.
-    - *Fix:* Isolate circuit breaker state per failure domain.
+- 📖 **[Architectural Anti-Patterns in Resilient System Design](doc/anti_patterns.md)** — Breakdown of 10 fatal anti-patterns (unbounded retries, missing jitter, retrying non-idempotent calls, hunch-based timeouts, context disconnection, and cascading shared circuit breakers).
+- 📖 **[Single-Database ACID Architecture vs. Distributed Microservices](doc/acid_monolith_architecture.md)** — Why single-database relational architectures win at moderate scale (< 500k DAU) with instant zero-code rollbacks (`ROLLBACK`) and kernel-level locking.
+- 📖 **[Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks](doc/distributed_transactions_sagas.md)** — Sagas vs. 2PC, Forward ($T_i$) vs. Compensating ($C_i$) actions, Transactional Outbox pattern, and curated literature (*Microservices Patterns*, *DDIA*, *Building Microservices*, *EIP*, seminal 1987 Sagas paper, Temporal, DTM).
+- 📖 **[Context Propagation & Socket Leak Prevention in Go](doc/context_cancellation_best_practices.md)** — How `exec.Context()` bridges `failsafe-go` policies to network sockets and prevents silent server resource leaks.
 
 ---
 
-## 5. Further Reading & Architectural Deep Dives
-
-All comprehensive deep-dive guides, distributed transaction strategies, and curated literature references are indexed in **[`doc/README.md`](doc/README.md)**:
-
-- 📖 **[Architectural Anti-Patterns in Resilient System Design](doc/anti_patterns.md)**
-- 📖 **[Single-Database ACID Architecture vs. Distributed Microservices](doc/acid_monolith_architecture.md)**
-- 📖 **[Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks](doc/distributed_transactions_sagas.md)**
-- 📖 **[Context Propagation & Socket Leak Prevention in Go](doc/context_cancellation_best_practices.md)**
-
----
-
-## 6. Running the Interactive Demo
+## 5. Running the Interactive Demo
 
 To run the interactive CLI demo covering all 4 live presentation scenarios:
 
@@ -170,7 +144,7 @@ go run ./cmd/demo/main.go
 
 ---
 
-## 7. Running the Parameterized & Testcontainers Test Suite
+## 6. Running the Parameterized & Testcontainers Test Suite
 
 ```bash
 # Run unit & live Testcontainers integration tests with race detector

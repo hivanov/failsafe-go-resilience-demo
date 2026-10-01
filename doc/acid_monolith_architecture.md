@@ -6,6 +6,14 @@ For the vast majority of real-world business applications (under 50,000–500,00
 
 ---
 
+## Table of Contents
+
+- [1. Why Single-Database ACID Wins at Moderate Scale](#1-why-single-database-acid-wins-at-moderate-scale)
+- [2. Architecture Comparison Matrix](#2-architecture-comparison-matrix)
+- [3. Concrete Go Implementation & Live Testcontainers Verification](#3-concrete-go-implementation--live-testcontainers-verification)
+
+---
+
 ## 1. Why Single-Database ACID Wins at Moderate Scale
 
 ```

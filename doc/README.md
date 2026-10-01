@@ -4,6 +4,15 @@ This directory contains in-depth architectural guides, distributed systems patte
 
 ---
 
+## Table of Contents
+
+- [1. Architectural Anti-Patterns in Resilient System Design](./anti_patterns.md)
+- [2. Single-Database ACID Architecture vs. Distributed Microservices](./acid_monolith_architecture.md)
+- [3. Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks](./distributed_transactions_sagas.md)
+- [4. Context Propagation & Socket Leak Prevention in Go](./context_cancellation_best_practices.md)
+
+---
+
 ## Document Index
 
 1. **[Architectural Anti-Patterns in Resilient System Design](./anti_patterns.md)**

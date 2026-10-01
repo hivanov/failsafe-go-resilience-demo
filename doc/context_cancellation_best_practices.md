@@ -8,6 +8,13 @@ Without context propagation, when a `failsafe-go` Operation Timeout or Per-Attem
 
 ---
 
+## Table of Contents
+
+- [1. The 3 Rules of Context-Aware Resilience](#1-the-3-rules-of-context-aware-resilience)
+- [2. Implementation in Downstream Drivers](#2-implementation-in-downstream-drivers)
+
+---
+
 ## 1. The 3 Rules of Context-Aware Resilience
 
 1. **Pass `exec.Context()` to Outbound Calls:**

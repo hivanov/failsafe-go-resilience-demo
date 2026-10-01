@@ -4,6 +4,19 @@ When systems exceed the scale of a single database, or when transactions span mu
 
 ---
 
+## Table of Contents
+
+- [1. The Distributed Transaction Dilemma: 2PC vs. Sagas](#1-the-distributed-transaction-dilemma-2pc-vs-sagas)
+- [2. The Saga Pattern: Forward Transactions (Ti) & Compensations (Ci)](#2-the-saga-pattern-forward-transactions-t_i--compensations-c_i)
+- [3. Orchestrated vs. Choreographed Sagas](#3-orchestrated-vs-choreographed-sagas)
+- [4. The 4 Golden Rules of Distributed Rollbacks & Compensations](#4-the-4-golden-rules-of-distributed-rollbacks--compensations)
+- [5. Curated Deep-Dive Resources: Sagas & Distributed Rollbacks](#5-curated-deep-dive-resources-sagas--distributed-rollbacks)
+  - [Foundational Books](#foundational-books)
+  - [Seminal Research Papers](#seminal-research-papers)
+  - [Production Go Distributed Transaction Frameworks & SDKs](#production-go-distributed-transaction-frameworks--sdks)
+
+---
+
 ## 1. The Distributed Transaction Dilemma: 2PC vs. Sagas
 
 ```
