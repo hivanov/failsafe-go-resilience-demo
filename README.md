@@ -162,11 +162,150 @@ func (g *HTTPPaymentGateway) Charge(ctx context.Context, req checkout.PaymentReq
 
 ---
 
-## 4. Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks
+## 4. The Monolithic Alternative: Plain Old "Everything in an ACID Database"
 
-When a single transaction spans multiple independent microservices (e.g., Order Service, Payment Gateway, Inventory DB, Warehouse Fulfillment), traditional single-process database transactions (`BEGIN ... COMMIT`) do not exist.
+Before adopting distributed microservices, message brokers, outbox tables, and Sagas, software architects should always evaluate the **Plain Old ACID-Compliant Database Architecture** (Single Relational Database / Modular Monolith).
 
-### 4.1 The Distributed Transaction Trade-Off: 2PC vs. Sagas
+For the vast majority of real-world business applications (under 50,000–100,000 active concurrent users), housing the domain entities within a single ACID-compliant database (such as **PostgreSQL**, **MySQL/InnoDB**, or **CockroachDB**) completely eliminates the entire class of distributed transaction and rollback bugs.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       MODULAR MONOLITH + ACID DATABASE                      │
+│                                                                             │
+│  [ Go Process: Checkout Orchestrator ]                                      │
+│    │                                                                        │
+│    ├── BEGIN TRANSACTION (Read Committed / Serializable)                    │
+│    │     1. SELECT stock FROM inventory WHERE item_id = $1 FOR UPDATE       │
+│    │     2. UPDATE inventory SET stock = stock - $qty WHERE item_id = $1    │
+│    │     3. INSERT INTO orders (id, customer_id, amount) VALUES (...)       │
+│    │     4. [Call External Payment API via failsafe-go Policy Onion]        │
+│    │        ├── On Success: COMMIT TRANSACTION (Instant atomic state)       │
+│    │        └── On Failure: ROLLBACK TRANSACTION (Automatic 0.1ms rollback) │
+│    └────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.1 Why Single-Database ACID Wins at Moderate Scale
+
+1. **Instant, Zero-Code Rollbacks (`ROLLBACK`):**
+   - The database engine's **Write-Ahead Log (WAL)** and **MVCC (Multi-Version Concurrency Control)** automatically undo all modified rows, sequence updates, and locks in under 0.1ms.
+   - You do **not** need to write, test, or maintain inverse compensating functions ($C_i$).
+2. **Deterministic Locking & Race Prevention (`SELECT ... FOR UPDATE`):**
+   - Row-level pessimistic locking prevents inventory double-allocation without needing distributed locking layers like Redis Redlock or Consul locks.
+3. **Zero Dual-Write Failures:**
+   - No risk of state diverging between two disjoint databases or message queues.
+4. **Sub-Millisecond In-Process Calls:**
+   - Communication between modules (e.g. Order $\rightarrow$ Inventory $\rightarrow$ Customer) happens via in-memory Go function calls taking $< 1\mu\text{s}$, rather than network serialization and HTTP/gRPC round-trips.
+
+---
+
+### 4.2 Architecture Comparison Matrix
+
+| Evaluation Dimension | Plain Old ACID Relational DB | Modular Monolith (1 DB) | Distributed Microservices (Sagas) |
+|---|---|---|---|
+| **Rollback Complexity** | **Trivial** (`ROLLBACK`) | **Trivial** (`ROLLBACK`) | **Very High** (Manual Compensating Actions $C_i$) |
+| **Consistency Model** | **Immediate Consistency** (ACID) | **Immediate Consistency** (ACID) | **Eventual Consistency** (BASE) |
+| **Failure Modes** | DB connection pool exhaustion | DB connection pool exhaustion | Partial partitions, dual writes, out-of-order events |
+| **Latency per Step** | $< 1\text{ms}$ (Local DB lock/index) | $< 1\text{ms}$ (Local DB lock/index) | $20\text{ms} - 150\text{ms}$ per network hop |
+| **Operational Footprint** | 1 Database instance (+ Replica) | 1 Database instance (+ Replica) | Kubernetes, Kafka/NATS, CDC Relay, Tracing |
+| **Recommended Scale** | **Up to 50,000 DAU** | **Up to 500,000 DAU** | **Large Multi-Team Enterprise (> 1M DAU)** |
+
+---
+
+### 4.3 Go Implementation Example: Transactional Rollback with Statement Timeout
+
+Here is how atomic transactions are implemented in Go with `database/sql` or `pgx`, paired with context timeouts:
+
+```go
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/failsafe-go-demo/checkout/pkg/checkout"
+)
+
+type PostgresOrderRepository struct {
+	db *sql.DB
+}
+
+func NewPostgresOrderRepository(db *sql.DB) *PostgresOrderRepository {
+	return &PostgresOrderRepository{db: db}
+}
+
+// ExecuteAtomicCheckout executes stock locking, external payment, and order recording
+// inside a single ACID transaction. If payment fails, the entire transaction is rolled back.
+func (r *PostgresOrderRepository) ExecuteAtomicCheckout(
+	ctx context.Context,
+	req checkout.OrderRequest,
+	chargeFn func(ctx context.Context) (checkout.PaymentResponse, error),
+) (*checkout.OrderResult, error) {
+	// 1. Bound transaction duration with context
+	txCtx, cancel := context.WithTimeout(ctx, 600*time.Millisecond)
+	defer cancel()
+
+	tx, err := r.db.BeginTx(txCtx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	// Defer rollback: If tx.Commit() is not reached, database guarantees 100% rollback
+	defer tx.Rollback()
+
+	// 2. Lock inventory row atomically with row-level lock
+	var currentStock int
+	row := tx.QueryRowContext(txCtx, "SELECT stock FROM inventory WHERE item_id = $1 FOR UPDATE", req.ItemID)
+	if err := row.Scan(&currentStock); err != nil {
+		return nil, fmt.Errorf("item not found: %w", err)
+	}
+	if currentStock < req.Quantity {
+		return nil, checkout.ErrInventoryDepleted
+	}
+
+	// 3. Decrement stock
+	_, err = tx.ExecContext(txCtx, "UPDATE inventory SET stock = stock - $1 WHERE item_id = $2", req.Quantity, req.ItemID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update inventory: %w", err)
+	}
+
+	// 4. Call external Payment Gateway (wrapped by failsafe-go policy onion)
+	payResp, err := chargeFn(txCtx)
+	if err != nil {
+		// Returning error triggers defer tx.Rollback(), instantly restoring inventory stock
+		return nil, fmt.Errorf("payment rejected, rolling back database: %w", err)
+	}
+
+	// 5. Record order entity
+	_, err = tx.ExecContext(
+		txCtx,
+		"INSERT INTO orders (order_id, customer_id, amount, currency, status, tx_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+		req.OrderID, req.CustomerID, req.Amount, req.Currency, payResp.Status, payResp.TransactionID, time.Now(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert order: %w", err)
+	}
+
+	// 6. Commit transaction atomically
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &checkout.OrderResult{
+		OrderID:       req.OrderID,
+		Status:        "SUCCESS",
+		TransactionID: payResp.TransactionID,
+	}, nil
+}
+```
+
+---
+
+## 5. Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks
+
+When systems exceed the scale of a single database, or when transactions span multiple external 3rd-party SaaS providers and independent microservices with disjoint databases, single ACID transactions are physically impossible.
+
+### 5.1 The Distributed Transaction Trade-Off: 2PC vs. Sagas
 
 ```
 ┌──────────────────────────────────────┬──────────────────────────────────────┐
@@ -183,7 +322,7 @@ In high-throughput distributed systems, **Two-Phase Commit (2PC)** is widely con
 
 ---
 
-### 4.2 The Saga Pattern: Forward Transactions ($T_i$) & Compensations ($C_i$)
+### 5.2 The Saga Pattern: Forward Transactions ($T_i$) & Compensations ($C_i$)
 
 A Saga is a sequence of local transactions:
 - For every forward step $T_i$ executed in a service, there is a corresponding **Compensating Transaction** $C_i$ designed to undo its semantic side-effects if a subsequent step $T_{i+1}$ permanently fails.
@@ -199,7 +338,7 @@ $$\text{Rollback Flow (if } T_3 \text{ fails): } T_1 \longrightarrow T_2 \longri
 
 ---
 
-### 4.3 Orchestrated vs. Choreographed Sagas
+### 5.3 Orchestrated vs. Choreographed Sagas
 
 1. **Orchestrated Saga (Command-Driven):**
    - A central coordinator (such as our Go `Orchestrator` or an engine like **Temporal / Cadence**) explicitly invokes each service via RPC/HTTP and records state transitions. If an unrecoverable failure occurs, the orchestrator invokes compensating activities in reverse order.
@@ -212,7 +351,7 @@ $$\text{Rollback Flow (if } T_3 \text{ fails): } T_1 \longrightarrow T_2 \longri
 
 ---
 
-### 4.4 The 4 Golden Rules of Distributed Rollbacks & Compensations
+### 5.4 The 4 Golden Rules of Distributed Rollbacks & Compensations
 
 1. **Compensations MUST Be Idempotent:**
    - In distributed systems, network retries can deliver compensation commands multiple times. Executing $C_i$ (e.g., `ReleaseInventory`) 3 times must have the exact same effect as executing it once.
@@ -225,7 +364,7 @@ $$\text{Rollback Flow (if } T_3 \text{ fails): } T_1 \longrightarrow T_2 \longri
 
 ---
 
-### 4.5 Go Implementation Example: Self-Contained Saga Coordinator with Automatic Compensation
+### 5.5 Go Implementation Example: Self-Contained Saga Coordinator with Automatic Compensation
 
 Here is how an in-memory orchestrated Saga runner is structured in idiomatic Go:
 
@@ -292,7 +431,7 @@ func (s *Orchestrator) rollback(ctx context.Context, executed []Step) {
 
 ---
 
-### 4.6 Curated Deep-Dive Resources: Sagas & Distributed Rollbacks
+### 5.6 Curated Deep-Dive Resources: Sagas & Distributed Rollbacks
 
 #### Foundational Books:
 - 📖 **"Microservices Patterns: With examples in Java"** by *Chris Richardson* (Manning Publications)
@@ -320,7 +459,7 @@ func (s *Orchestrator) rollback(ctx context.Context, executed []Step) {
 
 ---
 
-## 5. Interface Decoupling & Swappability
+## 6. Interface Decoupling & Swappability
 
 Every external dependency implements a distinct Go interface (`pkg/checkout/interfaces.go`):
 
@@ -332,7 +471,7 @@ Every external dependency implements a distinct Go interface (`pkg/checkout/inte
 
 ---
 
-## 6. Running the Interactive Demo
+## 7. Running the Interactive Demo
 
 To run the interactive CLI demo covering all 4 live presentation scenarios:
 
@@ -348,7 +487,7 @@ go run ./cmd/demo/main.go
 
 ---
 
-## 7. Running the Parameterized Test Suite
+## 8. Running the Parameterized Test Suite
 
 ```bash
 go test -v -race ./...
@@ -362,7 +501,7 @@ Coverage includes:
 
 ---
 
-## 8. Reference Documentation & Foundational Literature
+## 9. Reference Documentation & Foundational Literature
 
 - **Failsafe-go Official Site & Docs:** [failsafe-go.dev](https://failsafe-go.dev)
   - [Retry Policy Guide](https://failsafe-go.dev/retry)
