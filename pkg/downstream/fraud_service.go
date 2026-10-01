@@ -8,14 +8,16 @@ import (
 	"github.com/failsafe-go-demo/checkout/pkg/checkout"
 )
 
-// SimulatedFraudService simulates an internal ML risk-scoring microservice
+// SimulatedFraudService implements checkout.FraudService, simulating an internal
+// machine learning risk assessment microservice with configurable latency and decision overrides.
 type SimulatedFraudService struct {
-	mu            sync.Mutex
-	latency       time.Duration
-	forcedScore   int
+	mu             sync.Mutex
+	latency        time.Duration
+	forcedScore    int
 	forcedDecision string
 }
 
+// NewFraudService creates a new ML fraud service simulator with a baseline model evaluation latency.
 func NewFraudService(latency time.Duration) *SimulatedFraudService {
 	return &SimulatedFraudService{
 		latency:        latency,
@@ -24,6 +26,7 @@ func NewFraudService(latency time.Duration) *SimulatedFraudService {
 	}
 }
 
+// SetOverride overrides the default evaluation score and risk decision outcome.
 func (f *SimulatedFraudService) SetOverride(score int, decision string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -31,12 +34,14 @@ func (f *SimulatedFraudService) SetOverride(score int, decision string) {
 	f.forcedDecision = decision
 }
 
+// SetLatency updates the simulated model evaluation delay (e.g. to trigger timeouts).
 func (f *SimulatedFraudService) SetLatency(d time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.latency = d
 }
 
+// EvaluateRisk simulates executing the ML fraud scoring pipeline.
 func (f *SimulatedFraudService) EvaluateRisk(ctx context.Context, req checkout.OrderRequest) (checkout.RiskScore, error) {
 	f.mu.Lock()
 	lat := f.latency
@@ -58,17 +63,19 @@ func (f *SimulatedFraudService) EvaluateRisk(ctx context.Context, req checkout.O
 	}, nil
 }
 
-// SimulatedLoyaltyService records async rewards
+// SimulatedLoyaltyService implements checkout.LoyaltyService, tracking accumulated reward credits.
 type SimulatedLoyaltyService struct {
 	mu           sync.Mutex
 	AccruedTotal float64
 	CallCount    int
 }
 
+// NewLoyaltyService creates a new loyalty ledger simulator.
 func NewLoyaltyService() *SimulatedLoyaltyService {
 	return &SimulatedLoyaltyService{}
 }
 
+// AccruePoints simulates updating customer loyalty point ledger in the background.
 func (l *SimulatedLoyaltyService) AccruePoints(ctx context.Context, customerID string, amount float64) error {
 	select {
 	case <-time.After(15 * time.Millisecond):

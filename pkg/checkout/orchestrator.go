@@ -10,6 +10,8 @@ import (
 )
 
 // Orchestrator coordinates the end-to-end checkout pipeline within the 800ms business SLA.
+// It orchestrates hard critical dependencies (Payment, Inventory) and soft dependencies (Fraud, Loyalty)
+// using composable failsafe-go policy executors, context propagation, and transactional inventory rollbacks.
 type Orchestrator struct {
 	paymentGateway PaymentGateway
 	inventorySvc   InventoryService
@@ -24,7 +26,8 @@ type Orchestrator struct {
 	loyaltyExecutor   failsafe.Executor[any]
 }
 
-// NewOrchestrator initializes the orchestrator with interface-injected dependencies and policy executors.
+// NewOrchestrator initializes and returns a configured Orchestrator instance with
+// interface-injected downstream dependencies and dedicated failsafe-go policy executors.
 func NewOrchestrator(
 	payment PaymentGateway,
 	inventory InventoryService,
@@ -55,7 +58,16 @@ func NewOrchestrator(
 	}
 }
 
-// ProcessOrder handles customer checkout with SLA budgeting and graceful degradation.
+// ProcessOrder executes the complete checkout pipeline for an incoming order:
+//
+// 1. Checks parent context cancellation.
+// 2. Evaluates fraud risk within a 100ms Operation Timeout (degrading to heuristics on timeout).
+// 3. Locks warehouse inventory within a 150ms Operation Timeout.
+// 4. Charges payment gateway via the 400ms Policy Onion (Overall Operation Timeout -> Retry -> CB -> Per-Attempt Timeout).
+// 5. Rolls back inventory if payment fails non-retryably.
+// 6. Asynchronously grants loyalty points within a 200ms background Operation Timeout.
+//
+// Returns an OrderResult detailing final state, settlement references, attempt counts, and elapsed latency.
 func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (OrderResult, error) {
 	start := time.Now()
 
@@ -165,7 +177,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 	}, nil
 }
 
-// CircuitBreaker returns the underlying payment circuit breaker for status inspection
+// CircuitBreaker returns the underlying payment circuit breaker for status inspection and metrics export.
 func (o *Orchestrator) CircuitBreaker() circuitbreaker.CircuitBreaker[PaymentResponse] {
 	return o.paymentCB
 }

@@ -1,3 +1,6 @@
+// Package downstream provides thread-safe, realistic simulator implementations of external
+// payment gateways, database inventory repositories, ML risk engines, and loyalty ledgers
+// for local testing, demonstration, and fault injection without synthetic mocks.
 package downstream
 
 import (
@@ -10,7 +13,8 @@ import (
 	"github.com/failsafe-go-demo/checkout/pkg/checkout"
 )
 
-// SimulatedPaymentGateway implements checkout.PaymentGateway with realistic latency and programmable failure injection.
+// SimulatedPaymentGateway implements checkout.PaymentGateway with realistic latency simulation,
+// programmable error queues, custom handler hooks, and atomic call counting.
 type SimulatedPaymentGateway struct {
 	mu            sync.Mutex
 	callCount     int64
@@ -19,7 +23,7 @@ type SimulatedPaymentGateway struct {
 	customHandler func(ctx context.Context, req checkout.PaymentRequest, attempt int) (checkout.PaymentResponse, error)
 }
 
-// NewSimulatedPaymentGateway creates a new payment gateway simulator
+// NewSimulatedPaymentGateway creates a new payment gateway simulator with a base I/O latency.
 func NewSimulatedPaymentGateway(baseLatency time.Duration) *SimulatedPaymentGateway {
 	return &SimulatedPaymentGateway{
 		baseLatency:  baseLatency,
@@ -27,21 +31,22 @@ func NewSimulatedPaymentGateway(baseLatency time.Duration) *SimulatedPaymentGate
 	}
 }
 
-// QueueFailures queues errors for sequential attempts
+// QueueFailures appends error instances to the simulator's sequential failure queue.
+// Invocations of Charge will dequeue and return these errors in FIFO order.
 func (g *SimulatedPaymentGateway) QueueFailures(errs ...error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.failureQueue = append(g.failureQueue, errs...)
 }
 
-// SetCustomHandler allows custom simulation hooks
+// SetCustomHandler registers a dynamic execution hook to override default latency and error handling.
 func (g *SimulatedPaymentGateway) SetCustomHandler(h func(ctx context.Context, req checkout.PaymentRequest, attempt int) (checkout.PaymentResponse, error)) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.customHandler = h
 }
 
-// Charge executes a payment request with context-aware sleep and failure handling
+// Charge processes a credit card charge, simulating network round-trip latency while respecting context cancellation.
 func (g *SimulatedPaymentGateway) Charge(ctx context.Context, req checkout.PaymentRequest) (checkout.PaymentResponse, error) {
 	attempt := atomic.AddInt64(&g.callCount, 1)
 
@@ -76,12 +81,12 @@ func (g *SimulatedPaymentGateway) Charge(ctx context.Context, req checkout.Payme
 	}, nil
 }
 
-// TotalCalls returns the total count of Charge invocations
+// TotalCalls returns the cumulative number of Charge invocations attempted.
 func (g *SimulatedPaymentGateway) TotalCalls() int64 {
 	return atomic.LoadInt64(&g.callCount)
 }
 
-// Reset resets call counters and failure queues
+// Reset clears call counters, failure queues, and custom hooks, returning the gateway to a healthy baseline.
 func (g *SimulatedPaymentGateway) Reset() {
 	g.mu.Lock()
 	defer g.mu.Unlock()

@@ -1,3 +1,5 @@
+// Package checkout provides domain models, decoupled interfaces, fault-tolerance policies,
+// and orchestrators for executing resilient, SLA-governed checkout transactions in Go.
 package checkout
 
 import (
@@ -5,57 +7,113 @@ import (
 	"time"
 )
 
-// Standard Domain Errors
+// Standard domain errors returned by checkout operations and downstream dependencies.
 var (
-	ErrTransientNetwork   = errors.New("transient network timeout / socket error")
+	// ErrTransientNetwork indicates a temporary socket timeout or network disconnection that is safe to retry.
+	ErrTransientNetwork = errors.New("transient network timeout / socket error")
+
+	// ErrGatewayUnavailable indicates an external 3rd-party HTTP 503 Service Unavailable response.
 	ErrGatewayUnavailable = errors.New("downstream 3rd-party gateway 503 unavailable")
-	ErrRateLimited        = errors.New("downstream 429 rate limit exceeded")
-	ErrInvalidPayment     = errors.New("non-retryable payment rejection (400 / invalid credentials)")
-	ErrInventoryDepleted  = errors.New("insufficient inventory stock")
-	ErrFraudThreshold     = errors.New("fraud score exceeded acceptable risk threshold")
+
+	// ErrRateLimited indicates an HTTP 429 Too Many Requests response from an external provider.
+	ErrRateLimited = errors.New("downstream 429 rate limit exceeded")
+
+	// ErrInvalidPayment indicates a non-retryable payment failure, such as invalid credentials or card rejection (400 Bad Request).
+	ErrInvalidPayment = errors.New("non-retryable payment rejection (400 / invalid credentials)")
+
+	// ErrInventoryDepleted indicates that the requested item is out of stock in warehouse storage.
+	ErrInventoryDepleted = errors.New("insufficient inventory stock")
+
+	// ErrFraudThreshold indicates that the transaction's ML/heuristic fraud score exceeded the acceptable risk threshold.
+	ErrFraudThreshold = errors.New("fraud score exceeded acceptable risk threshold")
 )
 
-// OrderRequest represents the incoming checkout transaction
+// OrderRequest represents the incoming customer checkout request.
 type OrderRequest struct {
-	OrderID     string
-	CustomerID  string
-	ItemID      string
-	Quantity    int
-	Amount      float64
-	Currency    string
+	// OrderID is the unique identifier for the purchase order.
+	OrderID string
+
+	// CustomerID is the identifier of the authenticated buyer.
+	CustomerID string
+
+	// ItemID is the SKU of the product to purchase.
+	ItemID string
+
+	// Quantity is the number of units to reserve and purchase.
+	Quantity int
+
+	// Amount is the total transaction cost.
+	Amount float64
+
+	// Currency is the 3-letter ISO currency code (e.g., "EUR", "USD").
+	Currency string
+
+	// Idempotency is the client-provided idempotency key preventing duplicate charges.
 	Idempotency string
 }
 
-// OrderResult represents the final checkout result returned to caller
+// OrderResult represents the final outcome of the checkout transaction returned to the caller.
 type OrderResult struct {
-	OrderID       string        `json:"order_id"`
-	Status        string        `json:"status"` // SUCCESS, REVIEW_PENDING, FAILED
-	TransactionID string        `json:"transaction_id,omitempty"`
-	Reason        string        `json:"reason,omitempty"`
-	Elapsed       time.Duration `json:"elapsed"`
-	Attempts      int           `json:"attempts"`
-	Degraded      bool          `json:"degraded"`
+	// OrderID is the echoed purchase order identifier.
+	OrderID string `json:"order_id"`
+
+	// Status indicates the final processing state ("SUCCESS", "REVIEW_PENDING", "FAILED", "REJECTED", "CANCELED").
+	Status string `json:"status"`
+
+	// TransactionID is the settled payment reference or fallback queue identifier.
+	TransactionID string `json:"transaction_id,omitempty"`
+
+	// Reason contains human-readable explanation when the order fails or degrades.
+	Reason string `json:"reason,omitempty"`
+
+	// Elapsed is the total wall-clock time spent processing the request.
+	Elapsed time.Duration `json:"elapsed"`
+
+	// Attempts is the number of payment gateway attempts executed.
+	Attempts int `json:"attempts"`
+
+	// Degraded indicates whether any soft dependency (e.g. ML fraud or gateway fallback) operated in degraded mode.
+	Degraded bool `json:"degraded"`
 }
 
-// PaymentRequest contains payload sent to 3rd-party payment gateway
+// PaymentRequest contains the payload dispatched to the 3rd-party payment gateway.
 type PaymentRequest struct {
-	OrderID        string
-	Amount         float64
-	Currency       string
+	// OrderID is the unique reference for the order.
+	OrderID string
+
+	// Amount is the monetary charge amount.
+	Amount float64
+
+	// Currency is the 3-letter ISO currency code.
+	Currency string
+
+	// IdempotencyKey prevents double-charging during retries.
 	IdempotencyKey string
 }
 
-// PaymentResponse contains result from payment gateway
+// PaymentResponse contains the result received from the 3rd-party payment gateway.
 type PaymentResponse struct {
+	// TransactionID is the unique settlement reference returned by the gateway.
 	TransactionID string
-	Status        string
-	ProcessedAt   time.Time
+
+	// Status is the gateway transaction state ("SETTLED", "REVIEW_PENDING", "REJECTED").
+	Status string
+
+	// ProcessedAt records the gateway settlement timestamp.
+	ProcessedAt time.Time
 }
 
-// RiskScore represents fraud check evaluation
+// RiskScore represents the evaluation output from the fraud analysis service.
 type RiskScore struct {
-	Score        int    // 0 to 100 (higher = riskier)
-	Decision     string // APPROVE, MANUAL_REVIEW, REJECT
-	Confidence   float64
-	IsHeuristic  bool
+	// Score is the evaluated risk rating from 0 (lowest risk) to 100 (highest risk).
+	Score int
+
+	// Decision represents the risk assessment outcome ("APPROVE", "MANUAL_REVIEW", "REJECT", "APPROVE_DEGRADED").
+	Decision string
+
+	// Confidence is the statistical confidence score of the evaluation (0.0 to 1.0).
+	Confidence float64
+
+	// IsHeuristic indicates whether this evaluation was generated by rule heuristics due to an ML timeout.
+	IsHeuristic bool
 }
