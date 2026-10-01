@@ -28,9 +28,9 @@ func printHeader(title string) {
 
 func printResult(res checkout.OrderResult, err error) {
 	statusColor := ColorGreen
-	if res.Status == "REVIEW_PENDING" {
+	if res.Status == checkout.OrderStatusReviewPending {
 		statusColor = ColorYellow
-	} else if res.Status == "FAILED" || res.Status == "REJECTED" || err != nil {
+	} else if res.Status == checkout.OrderStatusFailed || res.Status == checkout.OrderStatusRejected || err != nil {
 		statusColor = ColorRed
 	}
 

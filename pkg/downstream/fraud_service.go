@@ -14,7 +14,7 @@ type SimulatedFraudService struct {
 	mu             sync.Mutex
 	latency        time.Duration
 	forcedScore    int
-	forcedDecision string
+	forcedDecision checkout.RiskDecision
 }
 
 // NewFraudService creates a new ML fraud service simulator with a baseline model evaluation latency.
@@ -22,12 +22,12 @@ func NewFraudService(latency time.Duration) *SimulatedFraudService {
 	return &SimulatedFraudService{
 		latency:        latency,
 		forcedScore:    10,
-		forcedDecision: "APPROVE",
+		forcedDecision: checkout.RiskDecisionApprove,
 	}
 }
 
 // SetOverride overrides the default evaluation score and risk decision outcome.
-func (f *SimulatedFraudService) SetOverride(score int, decision string) {
+func (f *SimulatedFraudService) SetOverride(score int, decision checkout.RiskDecision) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.forcedScore = score

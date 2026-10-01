@@ -107,7 +107,7 @@ func TestPostgres_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected order success, got error: %v", err)
 		}
-		if res.Status != "SUCCESS" {
+		if res.Status != checkout.OrderStatusSuccess {
 			t.Errorf("expected status SUCCESS, got %s", res.Status)
 		}
 
@@ -140,7 +140,7 @@ func TestPostgres_Integration(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected payment error, got nil result: %+v", res)
 		}
-		if res.Status != "FAILED" {
+		if res.Status != checkout.OrderStatusFailed {
 			t.Errorf("expected status FAILED, got %s", res.Status)
 		}
 
@@ -177,7 +177,7 @@ func TestPostgres_Integration(t *testing.T) {
 					Currency:    "EUR",
 					Idempotency: fmt.Sprintf("idem-buyer-%d", buyerID),
 				})
-				if err == nil && res.Status == "SUCCESS" {
+				if err == nil && res.Status == checkout.OrderStatusSuccess {
 					atomic.AddInt64(&successCount, 1)
 				}
 			}(i)

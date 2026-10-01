@@ -85,7 +85,7 @@ func BuildPaymentExecutor(cfg PaymentPolicyConfig) (failsafe.Executor[PaymentRes
 	// 2. Fallback Policy (catches unrecoverable errors/timeouts, returning degraded status)
 	fallbackPolicy := fallback.NewBuilderWithResult(PaymentResponse{
 		TransactionID: "FALLBACK_REVIEW_PENDING",
-		Status:        "REVIEW_PENDING",
+		Status:        PaymentStatusReviewPending,
 		ProcessedAt:   time.Now(),
 	}).
 		HandleErrors(ErrGatewayUnavailable, ErrRateLimited, timeout.ErrExceeded, circuitbreaker.ErrOpen).
@@ -201,7 +201,7 @@ func BuildFraudExecutor(cfg FraudPolicyConfig) failsafe.Executor[RiskScore] {
 
 	fallbackPol := fallback.NewBuilderWithResult(RiskScore{
 		Score:       20,
-		Decision:    "APPROVE_DEGRADED",
+		Decision:    RiskDecisionApproveDegraded,
 		Confidence:  0.60,
 		IsHeuristic: true,
 	}).

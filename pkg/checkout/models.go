@@ -28,6 +28,82 @@ var (
 	ErrFraudThreshold = errors.New("fraud score exceeded acceptable risk threshold")
 )
 
+// OrderStatus defines the strongly-typed lifecycle state of an order processing result.
+type OrderStatus string
+
+const (
+	// OrderStatusSuccess indicates the order was authorized, inventory reserved, and completed.
+	OrderStatusSuccess OrderStatus = "SUCCESS"
+
+	// OrderStatusReviewPending indicates payment degraded to an asynchronous manual review queue (fallback).
+	OrderStatusReviewPending OrderStatus = "REVIEW_PENDING"
+
+	// OrderStatusFailed indicates an unrecoverable failure during processing (e.g. payment rejected, db down).
+	OrderStatusFailed OrderStatus = "FAILED"
+
+	// OrderStatusRejected indicates the order was rejected before charge (e.g. fraud score too high).
+	OrderStatusRejected OrderStatus = "REJECTED"
+
+	// OrderStatusCanceled indicates processing was aborted due to client context cancellation.
+	OrderStatusCanceled OrderStatus = "CANCELED"
+)
+
+// String returns the string representation of the OrderStatus.
+func (s OrderStatus) String() string {
+	return string(s)
+}
+
+// IsSuccessful returns true if the order completed successfully.
+func (s OrderStatus) IsSuccessful() bool {
+	return s == OrderStatusSuccess
+}
+
+// IsDegraded returns true if the order completed via fallback degradation.
+func (s OrderStatus) IsDegraded() bool {
+	return s == OrderStatusReviewPending
+}
+
+// PaymentStatus defines the status returned by payment processing gateways.
+type PaymentStatus string
+
+const (
+	// PaymentStatusSettled indicates the payment transaction was authorized and settled.
+	PaymentStatusSettled PaymentStatus = "SETTLED"
+
+	// PaymentStatusReviewPending indicates the payment was routed to manual review queue.
+	PaymentStatusReviewPending PaymentStatus = "REVIEW_PENDING"
+
+	// PaymentStatusRejected indicates the payment was rejected by the issuer.
+	PaymentStatusRejected PaymentStatus = "REJECTED"
+)
+
+// String returns the string representation of PaymentStatus.
+func (s PaymentStatus) String() string {
+	return string(s)
+}
+
+// RiskDecision defines the categorical outcome of a fraud evaluation.
+type RiskDecision string
+
+const (
+	// RiskDecisionApprove indicates the transaction is low risk and approved.
+	RiskDecisionApprove RiskDecision = "APPROVE"
+
+	// RiskDecisionManualReview indicates the transaction requires human inspection.
+	RiskDecisionManualReview RiskDecision = "MANUAL_REVIEW"
+
+	// RiskDecisionReject indicates the transaction is high risk and rejected.
+	RiskDecisionReject RiskDecision = "REJECT"
+
+	// RiskDecisionApproveDegraded indicates the transaction was approved via fallback heuristics.
+	RiskDecisionApproveDegraded RiskDecision = "APPROVE_DEGRADED"
+)
+
+// String returns the string representation of RiskDecision.
+func (d RiskDecision) String() string {
+	return string(d)
+}
+
 // OrderRequest represents the incoming customer checkout request.
 type OrderRequest struct {
 	// OrderID is the unique identifier for the purchase order.
@@ -57,8 +133,8 @@ type OrderResult struct {
 	// OrderID is the echoed purchase order identifier.
 	OrderID string `json:"order_id"`
 
-	// Status indicates the final processing state ("SUCCESS", "REVIEW_PENDING", "FAILED", "REJECTED", "CANCELED").
-	Status string `json:"status"`
+	// Status indicates the final strongly-typed processing state.
+	Status OrderStatus `json:"status"`
 
 	// TransactionID is the settled payment reference or fallback queue identifier.
 	TransactionID string `json:"transaction_id,omitempty"`
@@ -96,8 +172,8 @@ type PaymentResponse struct {
 	// TransactionID is the unique settlement reference returned by the gateway.
 	TransactionID string
 
-	// Status is the gateway transaction state ("SETTLED", "REVIEW_PENDING", "REJECTED").
-	Status string
+	// Status is the gateway transaction state.
+	Status PaymentStatus
 
 	// ProcessedAt records the gateway settlement timestamp.
 	ProcessedAt time.Time
@@ -108,8 +184,8 @@ type RiskScore struct {
 	// Score is the evaluated risk rating from 0 (lowest risk) to 100 (highest risk).
 	Score int
 
-	// Decision represents the risk assessment outcome ("APPROVE", "MANUAL_REVIEW", "REJECT", "APPROVE_DEGRADED").
-	Decision string
+	// Decision represents the strongly-typed risk assessment outcome.
+	Decision RiskDecision
 
 	// Confidence is the statistical confidence score of the evaluation (0.0 to 1.0).
 	Confidence float64

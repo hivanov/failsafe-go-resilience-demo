@@ -76,7 +76,7 @@ func (g *SimulatedPaymentGateway) Charge(ctx context.Context, req checkout.Payme
 
 	return checkout.PaymentResponse{
 		TransactionID: fmt.Sprintf("tx_pay_%s_%d", req.OrderID, attempt),
-		Status:        "SETTLED",
+		Status:        checkout.PaymentStatusSettled,
 		ProcessedAt:   time.Now(),
 	}, nil
 }

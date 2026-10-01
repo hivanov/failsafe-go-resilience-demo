@@ -75,7 +75,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 	if err := ctx.Err(); err != nil {
 		return OrderResult{
 			OrderID: req.OrderID,
-			Status:  "CANCELED",
+			Status:  OrderStatusCanceled,
 			Reason:  err.Error(),
 			Elapsed: time.Since(start),
 		}, err
@@ -88,16 +88,16 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 	if err != nil {
 		return OrderResult{
 			OrderID: req.OrderID,
-			Status:  "REJECTED",
+			Status:  OrderStatusRejected,
 			Reason:  fmt.Sprintf("fraud check error: %v", err),
 			Elapsed: time.Since(start),
 		}, err
 	}
 
-	if fraudResult.Decision == "REJECT" {
+	if fraudResult.Decision == RiskDecisionReject {
 		return OrderResult{
 			OrderID: req.OrderID,
-			Status:  "REJECTED",
+			Status:  OrderStatusRejected,
 			Reason:  "high risk fraud detected",
 			Elapsed: time.Since(start),
 		}, ErrFraudThreshold
@@ -110,7 +110,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 	if err != nil {
 		return OrderResult{
 			OrderID: req.OrderID,
-			Status:  "FAILED",
+			Status:  OrderStatusFailed,
 			Reason:  fmt.Sprintf("inventory lock failed: %v", err),
 			Elapsed: time.Since(start),
 		}, err
@@ -138,7 +138,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 		_ = o.inventorySvc.ReleaseInventory(context.Background(), req.ItemID, req.Quantity)
 		return OrderResult{
 			OrderID:  req.OrderID,
-			Status:   "FAILED",
+			Status:   OrderStatusFailed,
 			Reason:   err.Error(),
 			Elapsed:  elapsed,
 			Attempts: attempts,
@@ -146,10 +146,10 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 	}
 
 	// Degraded fallback check (e.g. gateway down, order held in review queue)
-	if paymentResp.Status == "REVIEW_PENDING" {
+	if paymentResp.Status == PaymentStatusReviewPending {
 		return OrderResult{
 			OrderID:       req.OrderID,
-			Status:        "REVIEW_PENDING",
+			Status:        OrderStatusReviewPending,
 			TransactionID: paymentResp.TransactionID,
 			Reason:        "Payment gateway degraded; routed to manual verification queue",
 			Elapsed:       elapsed,
@@ -169,7 +169,7 @@ func (o *Orchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (Orde
 
 	return OrderResult{
 		OrderID:       req.OrderID,
-		Status:        "SUCCESS",
+		Status:        OrderStatusSuccess,
 		TransactionID: paymentResp.TransactionID,
 		Elapsed:       elapsed,
 		Attempts:      attempts,

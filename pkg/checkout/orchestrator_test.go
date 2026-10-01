@@ -15,17 +15,17 @@ import (
 
 func TestProcessOrder_ParameterizedTable(t *testing.T) {
 	type testCase struct {
-		name               string
-		req                checkout.OrderRequest
-		setupGateway       func(gw *downstream.SimulatedPaymentGateway)
-		setupInventory     func(inv *downstream.ThreadSafeInventoryService)
-		setupFraud         func(fr *downstream.SimulatedFraudService)
-		expectedStatus     string
-		expectedDegraded   bool
-		expectErr          bool
-		minAttempts        int
-		maxAttempts        int
-		expectedInvRemain  int
+		name              string
+		req               checkout.OrderRequest
+		setupGateway      func(gw *downstream.SimulatedPaymentGateway)
+		setupInventory    func(inv *downstream.ThreadSafeInventoryService)
+		setupFraud        func(fr *downstream.SimulatedFraudService)
+		expectedStatus    checkout.OrderStatus
+		expectedDegraded  bool
+		expectErr         bool
+		minAttempts       int
+		maxAttempts       int
+		expectedInvRemain int
 	}
 
 	tests := []testCase{
@@ -37,7 +37,7 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			setupGateway:      func(gw *downstream.SimulatedPaymentGateway) {},
 			setupInventory:    func(inv *downstream.ThreadSafeInventoryService) {},
 			setupFraud:        func(fr *downstream.SimulatedFraudService) {},
-			expectedStatus:    "SUCCESS",
+			expectedStatus:    checkout.OrderStatusSuccess,
 			expectedDegraded:  false,
 			expectErr:         false,
 			minAttempts:       1,
@@ -54,7 +54,7 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			},
 			setupInventory:    func(inv *downstream.ThreadSafeInventoryService) {},
 			setupFraud:        func(fr *downstream.SimulatedFraudService) {},
-			expectedStatus:    "SUCCESS",
+			expectedStatus:    checkout.OrderStatusSuccess,
 			expectedDegraded:  false,
 			expectErr:         false,
 			minAttempts:       2,
@@ -71,7 +71,7 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			},
 			setupInventory:    func(inv *downstream.ThreadSafeInventoryService) {},
 			setupFraud:        func(fr *downstream.SimulatedFraudService) {},
-			expectedStatus:    "FAILED",
+			expectedStatus:    checkout.OrderStatusFailed,
 			expectedDegraded:  false,
 			expectErr:         true,
 			minAttempts:       1,
@@ -89,7 +89,7 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			},
 			setupInventory:    func(inv *downstream.ThreadSafeInventoryService) {},
 			setupFraud:        func(fr *downstream.SimulatedFraudService) {},
-			expectedStatus:    "REVIEW_PENDING",
+			expectedStatus:    checkout.OrderStatusReviewPending,
 			expectedDegraded:  true,
 			expectErr:         false, // Degraded gracefully without returning hard error
 			minAttempts:       3,
@@ -106,7 +106,7 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			setupFraud: func(fr *downstream.SimulatedFraudService) {
 				fr.SetLatency(250 * time.Millisecond) // > 100ms fraud timeout
 			},
-			expectedStatus:    "SUCCESS",
+			expectedStatus:    checkout.OrderStatusSuccess,
 			expectedDegraded:  true, // Heuristic flag set
 			expectErr:         false,
 			minAttempts:       1,
@@ -121,9 +121,9 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			setupGateway:   func(gw *downstream.SimulatedPaymentGateway) {},
 			setupInventory: func(inv *downstream.ThreadSafeInventoryService) {},
 			setupFraud: func(fr *downstream.SimulatedFraudService) {
-				fr.SetOverride(95, "REJECT")
+				fr.SetOverride(95, checkout.RiskDecisionReject)
 			},
-			expectedStatus:    "REJECTED",
+			expectedStatus:    checkout.OrderStatusRejected,
 			expectedDegraded:  false,
 			expectErr:         true,
 			minAttempts:       0, // Never touches payment gateway
@@ -138,7 +138,7 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 			setupGateway:      func(gw *downstream.SimulatedPaymentGateway) {},
 			setupInventory:    func(inv *downstream.ThreadSafeInventoryService) {},
 			setupFraud:        func(fr *downstream.SimulatedFraudService) {},
-			expectedStatus:    "FAILED",
+			expectedStatus:    checkout.OrderStatusFailed,
 			expectedDegraded:  false,
 			expectErr:         true,
 			minAttempts:       0,
@@ -236,7 +236,7 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 	res1, _ := orch.ProcessOrder(context.Background(), checkout.OrderRequest{
 		OrderID: "ORD-CB-1", ItemID: "sku-item", Quantity: 1, Amount: 10.0,
 	})
-	if res1.Status != "REVIEW_PENDING" {
+	if res1.Status != checkout.OrderStatusReviewPending {
 		t.Fatalf("expected REVIEW_PENDING, got %s", res1.Status)
 	}
 
@@ -250,7 +250,7 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error on fast-fail fallback: %v", err)
 		}
-		if res.Status != "REVIEW_PENDING" {
+		if res.Status != checkout.OrderStatusReviewPending {
 			t.Errorf("expected REVIEW_PENDING on open circuit, got %s", res.Status)
 		}
 	}
@@ -296,7 +296,7 @@ func TestConcurrency_Bulkhead_Isolation(t *testing.T) {
 				Currency:    "EUR",
 				Idempotency: fmt.Sprintf("idem-conc-%d", id),
 			})
-			if err == nil && res.Status == "SUCCESS" {
+			if err == nil && res.Status == checkout.OrderStatusSuccess {
 				atomic.AddInt64(&successCount, 1)
 			}
 		}(i)
@@ -339,7 +339,7 @@ func TestContext_Cancellation(t *testing.T) {
 	if elapsed > 150*time.Millisecond {
 		t.Errorf("execution did not honor context cancellation promptly: took %v", elapsed)
 	}
-	if res.Status == "SUCCESS" {
+	if res.Status == checkout.OrderStatusSuccess {
 		t.Errorf("expected non-success status on canceled context, got SUCCESS")
 	}
 }
