@@ -18,8 +18,8 @@ This repository contains a production-grade demonstration and parameterized test
   ├── Ingress & JSON Serialization Buffer: -100ms
   └── Available Working Budget: 700ms
         ├── [Hard Critical] 3rd-Party Payment Gateway: 400ms max (Includes up to 2 retries + backoff + jitter)
-        ├── [Hard Critical] Inventory DB Row Lock:     150ms max
-        ├── [Semi-Critical] ML Fraud Evaluation:        100ms max (Strict fallback to heuristic rules)
+        ├── [Hard Critical] Inventory DB Row Lock:     150ms max (Operation Timeout)
+        ├── [Semi-Critical] ML Fraud Evaluation:        100ms max (Operation Timeout with heuristic fallback)
         └── [Safety Margin] Buffer:                     50ms slack
 ```
 
@@ -76,8 +76,6 @@ Without context propagation, when a `failsafe-go` Operation Timeout or Per-Attem
 
 ### Example Service Implementation: Context-Aware HTTP Client
 
-Here is an example demonstrating how a production downstream payment client should be structured:
-
 ```go
 package downstream
 
@@ -102,7 +100,6 @@ func NewHTTPPaymentGateway(baseURL string, transportTimeout time.Duration) *HTTP
 	return &HTTPPaymentGateway{
 		baseURL: baseURL,
 		client: &http.Client{
-			// Transport-level connection timeout (handshake/connect)
 			Timeout: transportTimeout,
 		},
 	}
@@ -123,7 +120,7 @@ func (g *HTTPPaymentGateway) Charge(ctx context.Context, req checkout.PaymentReq
 	url := fmt.Sprintf("%s/v1/charges", g.baseURL)
 
 	// 2. Attach context to HTTP request:
-	// When failsafe-go attempt timeout (e.g. 150ms) fires, ctx is canceled,
+	// When failsafe-go attempt timeout (150ms) fires, ctx is canceled,
 	// immediately terminating the active TCP connection and closing OS sockets.
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
@@ -136,7 +133,6 @@ func (g *HTTPPaymentGateway) Charge(ctx context.Context, req checkout.PaymentReq
 	// 3. Execute HTTP call
 	resp, err := g.client.Do(httpReq)
 	if err != nil {
-		// If context was canceled or timed out during flight, return ctx.Err() directly
 		if ctx.Err() != nil {
 			return checkout.PaymentResponse{}, ctx.Err()
 		}
@@ -166,7 +162,165 @@ func (g *HTTPPaymentGateway) Charge(ctx context.Context, req checkout.PaymentReq
 
 ---
 
-## 4. Interface Decoupling & Swappability
+## 4. Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks
+
+When a single transaction spans multiple independent microservices (e.g., Order Service, Payment Gateway, Inventory DB, Warehouse Fulfillment), traditional single-process database transactions (`BEGIN ... COMMIT`) do not exist.
+
+### 4.1 The Distributed Transaction Trade-Off: 2PC vs. Sagas
+
+```
+┌──────────────────────────────────────┬──────────────────────────────────────┐
+│ Two-Phase Commit (2PC / XA)          │ Saga Pattern (Compensating Sequence) │
+├──────────────────────────────────────┼──────────────────────────────────────┤
+│ ❌ Synchronous locks across network  │ ✔ Asynchronous local ACID TXs        │
+│ ❌ Coordinator is single point of POF│ ✔ Highly available under network partition│
+│ ❌ High latency (holds DB locks)     │ ✔ Fast forward execution             │
+│ ❌ Poor horizontal scalability       │ ✔ Eventual consistency (BASE)        │
+└──────────────────────────────────────┴──────────────────────────────────────┘
+```
+
+In high-throughput distributed systems, **Two-Phase Commit (2PC)** is widely considered an anti-pattern because holding locks across network hops destroys availability and throughput. Instead, architectures adopt **Eventual Consistency** via the **Saga Pattern**.
+
+---
+
+### 4.2 The Saga Pattern: Forward Transactions ($T_i$) & Compensations ($C_i$)
+
+A Saga is a sequence of local transactions:
+- For every forward step $T_i$ executed in a service, there is a corresponding **Compensating Transaction** $C_i$ designed to undo its semantic side-effects if a subsequent step $T_{i+1}$ permanently fails.
+
+$$\text{Forward Flow: } T_1 \longrightarrow T_2 \longrightarrow T_3 \dots \longrightarrow T_n$$
+$$\text{Rollback Flow (if } T_3 \text{ fails): } T_1 \longrightarrow T_2 \longrightarrow T_3 (\text{FAIL}) \Longrightarrow C_2 \longrightarrow C_1$$
+
+#### In Our Checkout Service:
+1. $T_1$ (`FraudService.EvaluateRisk`): Read-only evaluation (no compensation required).
+2. $T_2$ (`InventoryService.LockInventory`): Decrements available stock from warehouse.
+3. $T_3$ (`PaymentGateway.Charge`): Charges the customer credit card.
+4. **Failure Trigger:** If $T_3$ fails with a non-retryable error (e.g. `ErrInvalidPayment` 400), the orchestrator immediately triggers **$C_2$ (`InventoryService.ReleaseInventory`)** to restore the locked stock.
+
+---
+
+### 4.3 Orchestrated vs. Choreographed Sagas
+
+1. **Orchestrated Saga (Command-Driven):**
+   - A central coordinator (such as our Go `Orchestrator` or an engine like **Temporal / Cadence**) explicitly invokes each service via RPC/HTTP and records state transitions. If an unrecoverable failure occurs, the orchestrator invokes compensating activities in reverse order.
+   - *Best for:* Complex flows with strict SLA budgets, clear auditing requirements, and central time coordination.
+
+2. **Choreographed Saga (Event-Driven):**
+   - Services communicate by publishing and subscribing to domain events over a broker (Kafka, Solace, RabbitMQ, NATS).
+   - E.g., `OrderService` emits `OrderCreated` $\rightarrow$ `InventoryService` consumes, locks stock, emits `InventoryLocked` $\rightarrow$ `PaymentService` consumes, charges card, emits `PaymentFailed` $\rightarrow$ `InventoryService` consumes `PaymentFailed` and executes compensation.
+   - *Best for:* Simple pipelines with few participants and high decoupling needs.
+
+---
+
+### 4.4 The 4 Golden Rules of Distributed Rollbacks & Compensations
+
+1. **Compensations MUST Be Idempotent:**
+   - In distributed systems, network retries can deliver compensation commands multiple times. Executing $C_i$ (e.g., `ReleaseInventory`) 3 times must have the exact same effect as executing it once.
+2. **Handle Out-of-Order Message Arrival:**
+   - Due to network reordering, a compensation message ($C_i$) can arrive *before* the original forward command ($T_i$). Services must record a "cancel-pending" state so when $T_i$ eventually arrives, it is immediately discarded.
+3. **Transactional Outbox Pattern (Dual-Write Prevention):**
+   - Never write to a database and publish to a message broker as two separate, non-transactional operations. Store outgoing messages in a local database `outbox` table within the same ACID transaction as the business entity, and use a CDC (Change Data Capture) relay (e.g., Debezium) to publish to the broker.
+4. **Compensations Cannot Fail (Must Retry to Completion):**
+   - If a forward step fails, the business can abort. But if a *compensation* fails (e.g., DB temporarily down during inventory release), the system cannot give up. Compensations must be retried with exponential backoff until they succeed or are flagged for human operator intervention.
+
+---
+
+### 4.5 Go Implementation Example: Self-Contained Saga Coordinator with Automatic Compensation
+
+Here is how an in-memory orchestrated Saga runner is structured in idiomatic Go:
+
+```go
+package saga
+
+import (
+	"context"
+	"fmt"
+)
+
+// Step represents a forward activity and its inverse compensating rollback activity.
+type Step struct {
+	Name       string
+	Execute    func(ctx context.Context) error
+	Compensate func(ctx context.Context) error
+}
+
+// Orchestrator executes steps sequentially, rolling back completed steps in reverse order on failure.
+type Orchestrator struct {
+	steps []Step
+}
+
+func NewOrchestrator() *Orchestrator {
+	return &Orchestrator{steps: make([]Step, 0)}
+}
+
+func (s *Orchestrator) AddStep(step Step) {
+	s.steps = append(s.steps, step)
+}
+
+// Execute runs all forward steps. If any step fails, all preceding steps are compensated in LIFO order.
+func (s *Orchestrator) Execute(ctx context.Context) error {
+	var executedSteps []Step
+
+	for _, step := range s.steps {
+		if err := ctx.Err(); err != nil {
+			s.rollback(context.Background(), executedSteps)
+			return fmt.Errorf("saga canceled before '%s': %w", step.Name, err)
+		}
+
+		if err := step.Execute(ctx); err != nil {
+			// Rollback all previously executed steps in reverse order
+			s.rollback(context.Background(), executedSteps)
+			return fmt.Errorf("step '%s' failed: %w", step.Name, err)
+		}
+
+		executedSteps = append(executedSteps, step)
+	}
+
+	return nil
+}
+
+func (s *Orchestrator) rollback(ctx context.Context, executed []Step) {
+	// Traverse in reverse (LIFO)
+	for i := len(executed) - 1; i >= 0; i-- {
+		step := executed[i]
+		if step.Compensate != nil {
+			_ = step.Compensate(ctx)
+		}
+	}
+}
+```
+
+---
+
+### 4.6 Curated Deep-Dive Resources: Sagas & Distributed Rollbacks
+
+#### Foundational Books:
+- 📖 **"Microservices Patterns: With examples in Java"** by *Chris Richardson* (Manning Publications)
+  - *Chapters 4 & 5:* The definitive guide on Sagas, Orchestration vs. Choreography, and Compensating Transactions.
+- 📖 **"Designing Data-Intensive Applications (DDIA)"** by *Martin Kleppmann* (O'Reilly Media)
+  - *Chapters 7, 8 & 9:* Deep analysis of Distributed Transactions, Dual-Writes, Atomic Commit, Linearizability, and Two-Phase Commit limitations.
+- 📖 **"Building Microservices (2nd Edition)"** by *Sam Newman* (O'Reilly Media)
+  - *Chapter 6:* Distributed Transactions, Sagas, Eventual Consistency, and Async Coordination.
+- 📖 **"Enterprise Integration Patterns"** by *Gregor Hohpe & Bobby Woolf* (Addison-Wesley)
+  - Covers Process Manager, Routing Slip, and Compensating Message Router patterns.
+
+#### Seminal Research Papers:
+- 📄 **"Sagas" (1987)** by *Hector Garcia-Molina & Kenneth Salem* (Princeton University)
+  - The foundational paper introducing the Saga concept for long-lived transactions (LLTs). Available via ACM Digital Library.
+- 📄 **"Life beyond Distributed Transactions: an Apostate’s Opinion" (2007)** by *Pat Helland* (Amazon / Microsoft)
+  - Explains why distributed transactions fail to scale in cloud environments and how entities, idempotency, and messaging replace 2PC.
+
+#### Production Go Distributed Transaction Frameworks & SDKs:
+- 🛠️ **Temporal Go SDK** (`go.temporal.io/sdk`): [temporal.io](https://temporal.io)
+  - The premier workflow-as-code orchestration engine in Go. Workflows automatically track activity state, persist execution histories, and trigger compensating activities upon failure.
+- 🛠️ **DTM (Distributed Transaction Manager in Go)**: [github.com/dtm-labs/dtm](https://github.com/dtm-labs/dtm)
+  - High-performance Go distributed transaction framework supporting **SAGA**, **TCC (Try-Confirm-Cancel)**, and **XA/2PC** with built-in sub-transaction barrier technology to prevent out-of-order execution and null compensations.
+- 🛠️ **Cadence Go Client** (`go.uber.org/cadence`): [github.com/uber-go/cadence-client](https://github.com/uber-go/cadence-client)
+  - Uber's distributed workflow orchestration engine for long-running, fault-tolerant business transactions.
+
+---
+
+## 5. Interface Decoupling & Swappability
 
 Every external dependency implements a distinct Go interface (`pkg/checkout/interfaces.go`):
 
@@ -178,7 +332,7 @@ Every external dependency implements a distinct Go interface (`pkg/checkout/inte
 
 ---
 
-## 5. Running the Interactive Demo
+## 6. Running the Interactive Demo
 
 To run the interactive CLI demo covering all 4 live presentation scenarios:
 
@@ -194,7 +348,7 @@ go run ./cmd/demo/main.go
 
 ---
 
-## 6. Running the Parameterized Test Suite
+## 7. Running the Parameterized Test Suite
 
 ```bash
 go test -v -race ./...
@@ -208,7 +362,7 @@ Coverage includes:
 
 ---
 
-## 7. Reference Documentation & Foundational Literature
+## 8. Reference Documentation & Foundational Literature
 
 - **Failsafe-go Official Site & Docs:** [failsafe-go.dev](https://failsafe-go.dev)
   - [Retry Policy Guide](https://failsafe-go.dev/retry)
