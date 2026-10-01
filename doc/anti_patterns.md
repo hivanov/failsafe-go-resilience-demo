@@ -1,6 +1,6 @@
 # Common Anti-Patterns in Resilient System Design
 
-Building resilient software in Go requires understanding not just how to configure policies, but how poor configurations actively destabilize distributed systems. Below is an exhaustive breakdown of the most frequent anti-patterns encountered in production services.
+Building resilient software in Go requires understanding not just how to configure policies, but how flawed architectural assumptions and misconfigurations actively destabilize distributed systems. Below is an exhaustive breakdown of the most critical resilience anti-patterns encountered in production services.
 
 ---
 
@@ -9,13 +9,16 @@ Building resilient software in Go requires understanding not just how to configu
 - [1. Unbounded Retries (The Infinite Retry Loop)](#1-unbounded-retries-the-infinite-retry-loop)
 - [2. Retries Without Jitter (The Thundering Herd / Synchronized Stampede)](#2-retries-without-jitter-the-thundering-herd--synchronized-stampede)
 - [3. Retrying Non-Idempotent Operations (The Double-Charge Disaster)](#3-retrying-non-idempotent-operations-the-double-charge-disaster)
-- [4. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)](#4-lack-of-alternative-strategies-binary-success-or-fail-thinking)
-- [5. Untested Policy Code (Resilience as "Wishful Thinking")](#5-untested-policy-code-resilience-as-wishful-thinking)
-- [6. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps](#6-ignoring-the-critical-path--over-optimizing-non-critical-steps)
-- [7. Basing Policies on "Hunches" Instead of Observability & Metrics](#7-basing-policies-on-hunches-instead-of-observability--metrics)
-- [8. Context Disconnection & Socket Leaking](#8-context-disconnection--socket-leaking)
-- [9. Blind / Catch-All Error Retries (Retrying Deterministic Failures)](#9-blind--catch-all-error-retries-retrying-deterministic-failures)
-- [10. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)](#10-cascading-circuit-breaker-trips-shared-breakers-across-disparate-endpoints)
+- [4. Distributed & In-Process Locking Pitfalls (+ Deadlocks)](#4-distributed--in-process-locking-pitfalls--deadlocks)
+- [5. Inadequate Testing: Mock-Driven Illusion vs. Real Infrastructure](#5-inadequate-testing-mock-driven-illusion-vs-real-infrastructure)
+- [6. Lack of Real-World Observations (Designing in a Telemetry Vacuum)](#6-lack-of-real-world-observations-designing-in-a-telemetry-vacuum)
+- [7. Lack of Business Awareness (Building for Incorrect Scenarios & Load Profiles)](#7-lack-of-business-awareness-building-for-incorrect-scenarios--load-profiles)
+- [8. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)](#8-lack-of-alternative-strategies-binary-success-or-fail-thinking)
+- [9. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps](#9-ignoring-the-critical-path--over-optimizing-non-critical-steps)
+- [10. Basing Policies on "Hunches" Instead of Empirical SLAs](#10-basing-policies-on-hunches-instead-of-empirical-slas)
+- [11. Context Disconnection & Socket Leaking](#11-context-disconnection--socket-leaking)
+- [12. Blind / Catch-All Error Retries (Retrying Deterministic Failures)](#12-blind--catch-all-error-retries-retrying-deterministic-failures)
+- [13. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)](#13-cascading-circuit-breaker-trips-shared-breakers-across-disparate-endpoints)
 
 ---
 
@@ -52,7 +55,62 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 4. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)
+## 4. Distributed & In-Process Locking Pitfalls (+ Deadlocks)
+- **The Anti-Pattern:** Holding in-memory mutexes (`sync.Mutex`) or database transaction row locks (`SELECT ... FOR UPDATE`) across external network boundaries, or acquiring multiple locks in non-deterministic order.
+- **The Failure Modes:**
+  1. **Lock-Network Coupling:** Acquiring a PostgreSQL row lock and then making an outbound HTTP call to a 3rd-party Payment Gateway inside the open transaction. If the payment gateway stalls for 5 seconds, that database row—and all incoming transactions attempting to access it—are frozen, exhausting the database connection pool.
+  2. **Circular Deadlocks:** Service Worker 1 locks Resource A then requests Resource B ($A \rightarrow B$). Service Worker 2 locks Resource B then requests Resource A ($B \rightarrow A$). Both workers deadlock permanently until process termination or database deadlock detection aborts one.
+  3. **Lock Starvation & Missing Timeouts:** Waiting indefinitely for a lock without a context deadline.
+- **Remediation:**
+  - **Never hold locks during network I/O:** Complete database operations before making network calls, or isolate network calls within separate bounded steps.
+  - **Enforce Global Lock Ordering:** Always acquire locks in lexicographical or strictly defined sequence (e.g., sort item IDs before acquiring row locks).
+  - **Mandate Lock Timeouts:** Set PostgreSQL statement timeouts (`SET LOCAL statement_timeout = '150ms'`) and use `context.WithTimeout` on all lock acquisition routines.
+- **Code Reference:** See [`pkg/downstream/postgres_inventory.go`](../pkg/downstream/postgres_inventory.go) and [`doc/acid_monolith_architecture.md`](./acid_monolith_architecture.md).
+
+---
+
+## 5. Inadequate Testing: Mock-Driven Illusion vs. Real Infrastructure
+- **The Anti-Pattern:** Testing resilience exclusively with synthetic in-memory mocks that immediately return hardcoded errors in $< 0.1\text{ms}$.
+- **The Failure Mode:** Unit tests with shallow mocks give a false sense of security ("100% test coverage!"). In production, real distributed failure modes strike:
+  - Database kernel row locks contend and deadlock under high concurrency.
+  - Sockets leak because mocks never simulate half-open TCP connections or dropped packets.
+  - Failsafe error filters (`HandleErrors`) fail to match wrapped `*net.OpError` or `*url.Error` types.
+  - Concurrency data races corrupt circuit breaker counters under real multithreaded load.
+- **Remediation:**
+  - Author integration tests against **live containerized infrastructure** via `testcontainers-go` (e.g., real PostgreSQL 16 Alpine).
+  - Always run tests with the Go race detector enabled: `go test -count=1 -v -race ./...`.
+  - Simulate realistic latencies, socket disconnects, and transient error bursts using dedicated fault-injection simulators.
+- **Code Reference:** See [`pkg/checkout/postgres_integration_test.go`](../pkg/checkout/postgres_integration_test.go) and [`pkg/checkout/orchestrator_test.go`](../pkg/checkout/orchestrator_test.go).
+
+---
+
+## 6. Lack of Real-World Observations (Designing in a Telemetry Vacuum)
+- **The Anti-Pattern:** Designing timeout numbers, retry limits, and circuit breaker ratios purely on theoretical intuition or static architecture diagrams without inspecting production observability data.
+- **The Failure Mode:**
+  - Failure distributions in real networks are non-normal and heavily right-skewed (fat-tailed).
+  - Designing for the "average latency" (P50) causes constant timeouts on the P95/P99 tail.
+  - Engineering teams fail to observe how downstream dependencies degrade (e.g., partial service degradation vs. complete hard TCP resets).
+- **Remediation:**
+  - Instrument all policy execution hooks (`OnRetry`, `OnTimeoutExceeded`, `OnStateChanged`, `OnFallbackExecuted`) with Prometheus metrics and OpenTelemetry trace spans.
+  - Base timeout thresholds on live P99 latency histograms under actual peak load.
+- **Code Reference:** See [`pkg/checkout/telemetry.go`](../pkg/checkout/telemetry.go) and [`pkg/policies/payment_policy.go`](../pkg/policies/payment_policy.go).
+
+---
+
+## 7. Lack of Business Awareness (Building for Incorrect Scenarios & Load Profiles)
+- **The Anti-Pattern:** Engineering complex, over-engineered architectures without understanding the business model, actual user behavior, traffic volatility, or the real financial cost of specific failure modes.
+- **The Failure Modes:**
+  1. **Premature Distributed Microservices:** Implementing 15 microservices with Sagas, Kafka event choreography, and outbox relays for a system handling 500 daily orders. The distributed coordination complexity costs $10\times$ more in operational overhead than a clean Modular Monolith backed by PostgreSQL.
+  2. **Treating Auxiliary Features as Critical:** Failing the primary order checkout because the product recommendation engine or loyalty point calculation timed out.
+  3. **Ignoring Flash-Sale Traffic Surges:** Designing timeouts for normal 10 req/sec steady state, then suffering total system collapse during Black Friday bursts when database lock contention jumps $50\times$.
+- **Remediation:**
+  - Align architectural complexity with actual business scale (apply the 80/20 Pareto rule).
+  - Calculate the financial impact of degradation: It is far better to complete an order with estimated loyalty points or manual review queue routing than to abandon the customer's cart.
+- **Code Reference:** See [`doc/design_process_and_modularity.md`](./design_process_and_modularity.md) and [`doc/acid_monolith_architecture.md`](./acid_monolith_architecture.md).
+
+---
+
+## 8. Lack of Alternative Strategies (Binary Success-or-Fail Thinking)
 - **The Anti-Pattern:** Treating every dependency as binary: either it succeeds with 100% fidelity or the entire user request throws a 500 Internal Server Error.
 - **The Failure Mode:** When a soft dependency (like an ML fraud scoring service, recommendation widget, or loyalty reward ledger) experiences a slow path, the entire critical checkout pipeline fails, leading to lost revenue and frustrated users.
 - **Remediation:** Classify dependencies by business criticality. Equip all soft and semi-critical dependencies with **Fallback Policies**:
@@ -63,18 +121,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 5. Untested Policy Code (Resilience as "Wishful Thinking")
-- **The Anti-Pattern:** Adding timeout, retry, and circuit breaker declarations into codebases without writing dedicated failure-injection and parameterized test suites.
-- **The Failure Mode:** In production, policies fail silently:
-  - Circuit breakers never open because the error types configured in `HandleErrors(...)` do not match the wrapped errors returned by the HTTP client.
-  - Retry delays block request threads because timeouts were improperly layered.
-  - Concurrency race conditions corrupt internal state.
-- **Remediation:** Validate resilience policies using parameterized table tests, simulated network fault injection, live container integration tests (via `testcontainers-go`), and Go's concurrency race detector (`go test -race`).
-- **Code Reference:** See [`pkg/checkout/orchestrator_test.go`](../pkg/checkout/orchestrator_test.go) (7 parameterized cases, circuit breaker fast-fail, bulkhead concurrency) and [`pkg/checkout/postgres_integration_test.go`](../pkg/checkout/postgres_integration_test.go).
-
----
-
-## 6. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps
+## 9. Ignoring the Critical Path & Over-Optimizing Non-Critical Steps
 - **The Anti-Pattern:** Spending engineering time tuning retries on non-critical analytics or email dispatchers while leaving the core database lock and payment gateway unbudgeted.
 - **The Failure Mode:** The user-facing latency budget is consumed by the wrong activities. Slow critical operations breach SLA while background work monopolizes worker resources.
 - **Remediation:** Map the end-to-end request timeline. Identify the sequential **Critical Path** (e.g. Ingress $\rightarrow$ Fraud $\rightarrow$ Inventory DB Lock $\rightarrow$ Payment Charge). Allocate explicit time slices to each critical step. Move all non-critical work (e.g. Loyalty point calculation, email notification) off the critical path into asynchronous background goroutines bounded by separate contexts.
@@ -82,8 +129,8 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 7. Basing Policies on "Hunches" Instead of Observability & Metrics
-- **The Anti-Pattern:** Picking arbitrary timeout and retry numbers (e.g. "let's set a 5-second timeout and 5 retries") without analyzing real telemetry.
+## 10. Basing Policies on "Hunches" Instead of Empirical SLAs
+- **The Anti-Pattern:** Picking arbitrary timeout and retry numbers (e.g. "let's set a 5-second timeout and 5 retries") without analyzing real telemetry or upstream SLA contracts.
 - **The Failure Mode:**
   - *Timeout < P95 Latency:* If a downstream database query has a legitimate P95 latency of 300ms, setting a hunch-based timeout of 200ms causes a **self-inflicted outage** where 5% of healthy requests are aggressively aborted.
   - *Timeout > Client SLA:* Setting a 3-second timeout when the upstream API gateway SLA is 800ms means the upstream client disconnects long before the service gives up, wasting CPU and database capacity.
@@ -92,7 +139,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 8. Context Disconnection & Socket Leaking
+## 11. Context Disconnection & Socket Leaking
 - **The Anti-Pattern:** Declaring failsafe timeout policies but failing to pass `exec.Context()` to the underlying `http.Client` or `database/sql` driver.
 - **The Failure Mode:** When the failsafe timeout fires, the orchestrator proceeds, but the background goroutine and network socket continue running in the background until the OS TCP timeout (often 2 minutes). Under high concurrency, connection pools and file descriptors become saturated, leading to **silent server death**.
 - **Remediation:** Always pass `exec.Context()` down the entire call stack and use `http.NewRequestWithContext` or `QueryContext`/`ExecContext`.
@@ -100,7 +147,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 9. Blind / Catch-All Error Retries (Retrying Deterministic Failures)
+## 12. Blind / Catch-All Error Retries (Retrying Deterministic Failures)
 - **The Anti-Pattern:** Retrying on *any* error (`HandleErrors(err)` or catching all HTTP non-200 responses).
 - **The Failure Mode:** Retrying deterministic 4xx client errors (e.g., `400 Bad Request`, `401 Unauthorized`, `404 Not Found`, `422 Unprocessable Entity`, invalid credit card number). These errors will **never** succeed on retry; retrying them only wastes CPU, consumes bandwidth, and slows down the client response.
 - **Remediation:** Only retry **transient, recoverable errors** (e.g. `503 Service Unavailable`, `429 Too Many Requests`, temporary network drops, connection resets).
@@ -108,7 +155,7 @@ Building resilient software in Go requires understanding not just how to configu
 
 ---
 
-## 10. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)
+## 13. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)
 - **The Anti-Pattern:** Using a single global circuit breaker instance to protect calls to multiple distinct external APIs or database tables.
 - **The Failure Mode:** If an optional reporting endpoint goes down, the shared circuit breaker trips to `OPEN`, inadvertently taking down the critical payment processing pipeline with it.
 - **Remediation:** Isolate circuit breakers per failure domain, per endpoint, or per microservice interface.

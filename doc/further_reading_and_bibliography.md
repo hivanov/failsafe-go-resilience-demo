@@ -24,6 +24,10 @@ This guide compiles foundational literature, seminal academic papers, historical
   - *The bible of software resilience.* Introduced the definitive architectural definitions of Circuit Breakers, Bulkheads, Timeouts, Shed Load, and Fail Fast patterns.
 - 📖 **"Designing Data-Intensive Applications (DDIA)"** by *Martin Kleppmann* (O'Reilly Media)
   - *Chapters 7, 8, 9:* Deep analysis of unreliability in networks, clock skew, linearizability, distributed transactions, Two-Phase Commit limitations, and consensus algorithms (Raft/Paxos).
+- 📖 **"Distributed Systems: Principles and Paradigms" (2nd Edition)** by *Andrew S. Tanenbaum & Maarten van Steen* (Prentice Hall)
+  - *The foundational textbook on distributed computing.* Comprehensive coverage of RPC architectures, distributed synchronization, logical clocks (Lamport/Vector), consistency models (strict, sequential, causal, eventual), and fault-tolerant replication protocols.
+- 📖 **"Building Eventual Consistency: Mastering Distributed Systems"** by *TailoredRead*
+  - Comprehensive guide on architecting eventually consistent distributed systems: asynchronous message passing, outbox relays, idempotent receivers, conflict resolution, and Saga orchestration.
 - 📖 **"Microservices Patterns: With examples in Java"** by *Chris Richardson* (Manning Publications)
   - *Chapters 4 & 5:* The definitive treatment of the Saga Pattern, Orchestration vs. Choreography, and Compensating Transactions for eventual consistency.
 - 📖 **"Building Microservices: Designing Fine-Grained Systems" (2nd Edition)** by *Sam Newman* (O'Reilly Media)
