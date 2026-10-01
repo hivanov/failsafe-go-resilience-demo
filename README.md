@@ -2,7 +2,7 @@
 
 > **Engineering for Reality: SLA-Driven Fault Tolerance in a Single Go Process**
 
-This repository contains a production-grade demonstration and parameterized test suite showcasing resilience patterns using [`failsafe-go`](https://github.com/failsafe-go/failsafe-go) (official documentation at [failsafe-go.dev](https://failsafe-go.dev)).
+This repository contains a production-grade demonstration, parameterized test suite, and live PostgreSQL Testcontainers suite showcasing resilience patterns using [`failsafe-go`](https://github.com/failsafe-go/failsafe-go) (official documentation at [failsafe-go.dev](https://failsafe-go.dev)).
 
 ---
 
@@ -213,8 +213,6 @@ For the vast majority of real-world business applications (under 50,000–100,00
 
 ### 4.3 Go Implementation Example: Transactional Rollback with Statement Timeout
 
-Here is how atomic transactions are implemented in Go with `database/sql` or `pgx`, paired with context timeouts:
-
 ```go
 package repository
 
@@ -366,8 +364,6 @@ $$\text{Rollback Flow (if } T_3 \text{ fails): } T_1 \longrightarrow T_2 \longri
 
 ### 5.5 Go Implementation Example: Self-Contained Saga Coordinator with Automatic Compensation
 
-Here is how an in-memory orchestrated Saga runner is structured in idiomatic Go:
-
 ```go
 package saga
 
@@ -487,17 +483,23 @@ go run ./cmd/demo/main.go
 
 ---
 
-## 8. Running the Parameterized Test Suite
+## 8. Running the Parameterized & Testcontainers Test Suite
 
 ```bash
+# Run unit & live Testcontainers integration tests with race detector
 go test -v -race ./...
 ```
 
 Coverage includes:
-- Parameterized matrix across normal execution, transient recovery, non-retryable 400 fast-fail, inventory rollback, and fraud degradation.
-- Circuit breaker fast-fail verification.
-- High-concurrency bulkhead isolation burst test under the Go race detector.
-- Context cancellation propagation test.
+- **Parameterized Test Matrix (`pkg/checkout/orchestrator_test.go`):** Normal execution, transient recovery, non-retryable 400 fast-fail, inventory rollback, and fraud degradation.
+- **Circuit Breaker Fast-Fail Test:** Verifies immediate $< 1\text{ms}$ return without touching downstream sockets.
+- **High-Concurrency Bulkhead Test:** 30 concurrent goroutines under `-race`.
+- **Context Cancellation Propagation Test:** Sub-millisecond abort on client cancel.
+- **Live PostgreSQL Testcontainer Integration Test (`pkg/checkout/postgres_integration_test.go`):**
+  - Spins up a real `postgres:16-alpine` container via `testcontainers-go`.
+  - Executes schema creation, atomic row locking (`SELECT ... FOR UPDATE`), and real SQL stock deductions.
+  - Verifies concrete transactional rollback in PostgreSQL when payment fails.
+  - Tests 8 concurrent buyer transactions against real PostgreSQL verifying zero double-spending.
 
 ---
 
