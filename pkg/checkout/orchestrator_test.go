@@ -10,6 +10,7 @@ import (
 
 	"github.com/failsafe-go-demo/checkout/pkg/checkout"
 	"github.com/failsafe-go-demo/checkout/pkg/downstream"
+	"github.com/failsafe-go-demo/checkout/pkg/policies"
 	"github.com/failsafe-go/failsafe-go/circuitbreaker"
 )
 
@@ -165,19 +166,19 @@ func TestProcessOrder_ParameterizedTable(t *testing.T) {
 				tc.setupFraud(fr)
 			}
 
-			payCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
+			payCfg := policies.DefaultPaymentPolicyConfig(telemetry)
 			payCfg.BackoffMin = 10 * time.Millisecond
 			payCfg.BackoffMax = 30 * time.Millisecond
 
-			invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
-			fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
-			loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
+			invCfg := policies.DefaultInventoryPolicyConfig(telemetry)
+			fraudCfg := policies.DefaultFraudPolicyConfig(telemetry)
+			loyaltyCfg := policies.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
 			// Wrap interfaces in their respective resilient policy implementations
-			resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
-			resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
-			resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
-			resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+			resilientPay := policies.NewResilientPaymentGateway(gw, payCfg)
+			resilientInv := policies.NewResilientInventoryService(inv, invCfg)
+			resilientFraud := policies.NewResilientFraudService(fr, fraudCfg)
+			resilientLoyalty := policies.NewResilientLoyaltyService(loyalty, loyaltyCfg)
 
 			orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
@@ -213,7 +214,7 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 	fr := downstream.NewFraudService(2 * time.Millisecond)
 	loyalty := downstream.NewLoyaltyService()
 
-	payCfg := checkout.PaymentPolicyConfig{
+	payCfg := policies.PaymentPolicyConfig{
 		OverallOperationTimeout: 200 * time.Millisecond,
 		AttemptTimeout:          80 * time.Millisecond,
 		MaxRetries:              1,
@@ -226,14 +227,14 @@ func TestCircuitBreaker_FastFail(t *testing.T) {
 		Telemetry:               telemetry,
 	}
 
-	invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
-	fraudCfg := checkout.FraudPolicyConfig{OperationTimeout: 50 * time.Millisecond, Telemetry: telemetry}
-	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 100 * time.Millisecond, Telemetry: telemetry}
+	invCfg := policies.DefaultInventoryPolicyConfig(telemetry)
+	fraudCfg := policies.FraudPolicyConfig{OperationTimeout: 50 * time.Millisecond, Telemetry: telemetry}
+	loyaltyCfg := policies.LoyaltyPolicyConfig{OperationTimeout: 100 * time.Millisecond, Telemetry: telemetry}
 
-	resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
-	resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
-	resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
-	resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+	resilientPay := policies.NewResilientPaymentGateway(gw, payCfg)
+	resilientInv := policies.NewResilientInventoryService(inv, invCfg)
+	resilientFraud := policies.NewResilientFraudService(fr, fraudCfg)
+	resilientLoyalty := policies.NewResilientLoyaltyService(loyalty, loyaltyCfg)
 
 	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
@@ -283,15 +284,15 @@ func TestConcurrency_Bulkhead_Isolation(t *testing.T) {
 	fr := downstream.NewFraudService(5 * time.Millisecond)
 	loyalty := downstream.NewLoyaltyService()
 
-	payCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
-	invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
-	fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
-	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
+	payCfg := policies.DefaultPaymentPolicyConfig(telemetry)
+	invCfg := policies.DefaultInventoryPolicyConfig(telemetry)
+	fraudCfg := policies.DefaultFraudPolicyConfig(telemetry)
+	loyaltyCfg := policies.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
-	resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
-	resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
-	resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+	resilientPay := policies.NewResilientPaymentGateway(gw, payCfg)
+	resilientInv := policies.NewResilientInventoryService(inv, invCfg)
+	resilientFraud := policies.NewResilientFraudService(fr, fraudCfg)
+	resilientLoyalty := policies.NewResilientLoyaltyService(loyalty, loyaltyCfg)
 
 	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 
@@ -336,15 +337,15 @@ func TestContext_Cancellation(t *testing.T) {
 	fr := downstream.NewFraudService(10 * time.Millisecond)
 	loyalty := downstream.NewLoyaltyService()
 
-	payCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
-	invCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
-	fraudCfg := checkout.DefaultFraudPolicyConfig(telemetry)
-	loyaltyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
+	payCfg := policies.DefaultPaymentPolicyConfig(telemetry)
+	invCfg := policies.DefaultInventoryPolicyConfig(telemetry)
+	fraudCfg := policies.DefaultFraudPolicyConfig(telemetry)
+	loyaltyCfg := policies.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	resilientPay := checkout.NewResilientPaymentGateway(gw, payCfg)
-	resilientInv := checkout.NewResilientInventoryService(inv, invCfg)
-	resilientFraud := checkout.NewResilientFraudService(fr, fraudCfg)
-	resilientLoyalty := checkout.NewResilientLoyaltyService(loyalty, loyaltyCfg)
+	resilientPay := policies.NewResilientPaymentGateway(gw, payCfg)
+	resilientInv := policies.NewResilientInventoryService(inv, invCfg)
+	resilientFraud := policies.NewResilientFraudService(fr, fraudCfg)
+	resilientLoyalty := policies.NewResilientLoyaltyService(loyalty, loyaltyCfg)
 
 	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 

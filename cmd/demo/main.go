@@ -7,6 +7,7 @@ import (
 
 	"github.com/failsafe-go-demo/checkout/pkg/checkout"
 	"github.com/failsafe-go-demo/checkout/pkg/downstream"
+	"github.com/failsafe-go-demo/checkout/pkg/policies"
 )
 
 // ANSI color formatting
@@ -55,10 +56,10 @@ func main() {
 	fmt.Printf("Demonstrating Operation Time Budgeting, Policy Composition, and Single-Process Fault Tolerance\n")
 
 	telemetry := checkout.NewInMemoryTelemetry()
-	payPolicyCfg := checkout.DefaultPaymentPolicyConfig(telemetry)
-	invPolicyCfg := checkout.DefaultInventoryPolicyConfig(telemetry)
-	fraudPolicyCfg := checkout.DefaultFraudPolicyConfig(telemetry)
-	loyaltyPolicyCfg := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
+	payPolicyCfg := policies.DefaultPaymentPolicyConfig(telemetry)
+	invPolicyCfg := policies.DefaultInventoryPolicyConfig(telemetry)
+	fraudPolicyCfg := policies.DefaultFraudPolicyConfig(telemetry)
+	loyaltyPolicyCfg := policies.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
 	// -------------------------------------------------------------------------
 	// SCENARIO 1: Happy Path
@@ -70,10 +71,10 @@ func main() {
 	rawLoyalty1 := downstream.NewLoyaltyService()
 
 	// Decorate raw dependencies with resilient policy implementations
-	pay1 := checkout.NewResilientPaymentGateway(rawGateway1, payPolicyCfg)
-	inv1 := checkout.NewResilientInventoryService(rawInventory1, invPolicyCfg)
-	fraud1 := checkout.NewResilientFraudService(rawFraud1, fraudPolicyCfg)
-	loyalty1 := checkout.NewResilientLoyaltyService(rawLoyalty1, loyaltyPolicyCfg)
+	pay1 := policies.NewResilientPaymentGateway(rawGateway1, payPolicyCfg)
+	inv1 := policies.NewResilientInventoryService(rawInventory1, invPolicyCfg)
+	fraud1 := policies.NewResilientFraudService(rawFraud1, fraudPolicyCfg)
+	loyalty1 := policies.NewResilientLoyaltyService(rawLoyalty1, loyaltyPolicyCfg)
 
 	orch1 := checkout.NewOrchestrator(pay1, inv1, fraud1, loyalty1, telemetry)
 
@@ -97,7 +98,7 @@ func main() {
 	rawGateway2 := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
 	rawGateway2.QueueFailures(checkout.ErrGatewayUnavailable) // 1st attempt fails
 
-	pay2 := checkout.NewResilientPaymentGateway(rawGateway2, payPolicyCfg)
+	pay2 := policies.NewResilientPaymentGateway(rawGateway2, payPolicyCfg)
 	orch2 := checkout.NewOrchestrator(pay2, inv1, fraud1, loyalty1, telemetry)
 
 	req2 := checkout.OrderRequest{
@@ -122,7 +123,7 @@ func main() {
 		rawGateway3.QueueFailures(checkout.ErrGatewayUnavailable)
 	}
 
-	pay3 := checkout.NewResilientPaymentGateway(rawGateway3, payPolicyCfg)
+	pay3 := policies.NewResilientPaymentGateway(rawGateway3, payPolicyCfg)
 	orch3 := checkout.NewOrchestrator(pay3, inv1, fraud1, loyalty1, telemetry)
 
 	for i := 1; i <= 4; i++ {
@@ -147,8 +148,8 @@ func main() {
 	rawGateway4 := downstream.NewSimulatedPaymentGateway(50 * time.Millisecond)
 	rawFraud4 := downstream.NewFraudService(300 * time.Millisecond) // ML model hangs for 300ms (> 100ms budget)
 
-	pay4 := checkout.NewResilientPaymentGateway(rawGateway4, payPolicyCfg)
-	fraud4 := checkout.NewResilientFraudService(rawFraud4, fraudPolicyCfg)
+	pay4 := policies.NewResilientPaymentGateway(rawGateway4, payPolicyCfg)
+	fraud4 := policies.NewResilientFraudService(rawFraud4, fraudPolicyCfg)
 	orch4 := checkout.NewOrchestrator(pay4, inv1, fraud4, loyalty1, telemetry)
 
 	req4 := checkout.OrderRequest{

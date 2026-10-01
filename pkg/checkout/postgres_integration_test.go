@@ -12,6 +12,7 @@ import (
 
 	"github.com/failsafe-go-demo/checkout/pkg/checkout"
 	"github.com/failsafe-go-demo/checkout/pkg/downstream"
+	"github.com/failsafe-go-demo/checkout/pkg/policies"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -84,15 +85,15 @@ func TestPostgres_Integration(t *testing.T) {
 	fraudSvc := downstream.NewFraudService(10 * time.Millisecond)
 	loyaltySvc := downstream.NewLoyaltyService()
 
-	payPolicy := checkout.DefaultPaymentPolicyConfig(telemetry)
-	invPolicy := checkout.DefaultInventoryPolicyConfig(telemetry)
-	fraudPolicy := checkout.DefaultFraudPolicyConfig(telemetry)
-	loyaltyPolicy := checkout.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
+	payPolicy := policies.DefaultPaymentPolicyConfig(telemetry)
+	invPolicy := policies.DefaultInventoryPolicyConfig(telemetry)
+	fraudPolicy := policies.DefaultFraudPolicyConfig(telemetry)
+	loyaltyPolicy := policies.LoyaltyPolicyConfig{OperationTimeout: 200 * time.Millisecond, Telemetry: telemetry}
 
-	resilientPay := checkout.NewResilientPaymentGateway(payGateway, payPolicy)
-	resilientInv := checkout.NewResilientInventoryService(pgInv, invPolicy)
-	resilientFraud := checkout.NewResilientFraudService(fraudSvc, fraudPolicy)
-	resilientLoyalty := checkout.NewResilientLoyaltyService(loyaltySvc, loyaltyPolicy)
+	resilientPay := policies.NewResilientPaymentGateway(payGateway, payPolicy)
+	resilientInv := policies.NewResilientInventoryService(pgInv, invPolicy)
+	resilientFraud := policies.NewResilientFraudService(fraudSvc, fraudPolicy)
+	resilientLoyalty := policies.NewResilientLoyaltyService(loyaltySvc, loyaltyPolicy)
 
 	orch := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 

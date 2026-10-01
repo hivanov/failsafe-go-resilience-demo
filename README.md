@@ -476,27 +476,27 @@ To keep the top-level `Orchestrator` clean, decoupled, and testable, all resilie
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Resilient Decorator Wrappers:
-1. **`ResilientPaymentGateway`** (implements `PaymentGateway`): Encapsulates the 5-layer Policy Onion (Fallback $\rightarrow$ 400ms Overall Timeout $\rightarrow$ Retries w/ Jitter $\rightarrow$ Circuit Breaker $\rightarrow$ 150ms Attempt Timeout).
-2. **`ResilientInventoryService`** (implements `InventoryService`): Encapsulates the 150ms database row-locking Operation Timeout.
-3. **`ResilientFraudService`** (implements `FraudService`): Encapsulates the 100ms ML evaluation Operation Timeout and graceful heuristic fallback.
-4. **`ResilientLoyaltyService`** (implements `LoyaltyService`): Encapsulates the 200ms background reward accrual Operation Timeout.
+### Resilient Decorator Wrappers (`pkg/policies/`):
+- **`pkg/policies/payment_policy.go`** (`ResilientPaymentGateway`): Encapsulates the 5-layer Policy Onion (Fallback $\rightarrow$ 400ms Overall Timeout $\rightarrow$ Retries w/ Jitter $\rightarrow$ Circuit Breaker $\rightarrow$ 150ms Attempt Timeout).
+- **`pkg/policies/inventory_policy.go`** (`ResilientInventoryService`): Encapsulates the 150ms database row-locking Operation Timeout.
+- **`pkg/policies/fraud_policy.go`** (`ResilientFraudService`): Encapsulates the 100ms ML evaluation Operation Timeout and graceful heuristic fallback.
+- **`pkg/policies/loyalty_policy.go`** (`ResilientLoyaltyService`): Encapsulates the 200ms background reward accrual Operation Timeout.
 
 ### Composition in Main / Setup:
 ```go
-// 1. Raw infrastructure drivers
+// 1. Raw infrastructure drivers (pkg/downstream)
 rawPay := downstream.NewSimulatedPaymentGateway(70 * time.Millisecond)
 rawInv := downstream.NewInventoryService(initialStock, 20 * time.Millisecond)
 rawFraud := downstream.NewFraudService(30 * time.Millisecond)
 rawLoyalty := downstream.NewLoyaltyService()
 
-// 2. Decorate with resilient policy implementations
-resilientPay := checkout.NewResilientPaymentGateway(rawPay, payPolicyCfg)
-resilientInv := checkout.NewResilientInventoryService(rawInv, invPolicyCfg)
-resilientFraud := checkout.NewResilientFraudService(rawFraud, fraudPolicyCfg)
-resilientLoyalty := checkout.NewResilientLoyaltyService(rawLoyalty, loyaltyPolicyCfg)
+// 2. Decorate with resilient policy implementations (pkg/policies)
+resilientPay := policies.NewResilientPaymentGateway(rawPay, payPolicyCfg)
+resilientInv := policies.NewResilientInventoryService(rawInv, invPolicyCfg)
+resilientFraud := policies.NewResilientFraudService(rawFraud, fraudPolicyCfg)
+resilientLoyalty := policies.NewResilientLoyaltyService(rawLoyalty, loyaltyPolicyCfg)
 
-// 3. Inject into Orchestrator (Orchestrator remains ultra-clean)
+// 3. Inject into Orchestrator (Orchestrator remains ultra-clean, pkg/checkout)
 orchestrator := checkout.NewOrchestrator(resilientPay, resilientInv, resilientFraud, resilientLoyalty, telemetry)
 ```
 
