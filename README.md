@@ -291,7 +291,7 @@ func (r *PostgresOrderRepository) ExecuteAtomicCheckout(
 
 	return &checkout.OrderResult{
 		OrderID:       req.OrderID,
-		Status:        "SUCCESS",
+		Status:        checkout.OrderStatusSuccess,
 		TransactionID: payResp.TransactionID,
 	}, nil
 }
