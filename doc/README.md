@@ -14,7 +14,8 @@ This directory contains in-depth architectural guides, distributed systems patte
 - [6. Context Propagation & Socket Leak Prevention in Go](./context_cancellation_best_practices.md)
 - [7. Stakeholder Interview Framework & Caching Fallback Architectures in Go](./product_owner_interview_and_caching_fallbacks.md)
 - [8. Workflow Engines vs. In-Process Go Orchestration: Trade-offs & Unit Economics](./workflow_engines_vs_code_orchestration.md)
-- [9. Further Reading, Bibliography & Historical Media](./further_reading_and_bibliography.md)
+- [9. The Economics of Resilience: SLA Cost Scaling, SDLC Attribution & Maturity Governance](./resilience_economics_and_maturity_levels.md)
+- [10. Further Reading, Bibliography & Historical Media](./further_reading_and_bibliography.md)
 
 ---
 
@@ -48,5 +49,8 @@ This directory contains in-depth architectural guides, distributed systems patte
 8. **[Workflow Engines vs. In-Process Go Orchestration: Trade-offs & Unit Economics](./workflow_engines_vs_code_orchestration.md)**
    - The fallacy of "No-Code Resilience": Why visual engines (Google Cloud Workflows, Microsoft PowerAutomate, AWS Step Functions, Azure Logic Apps, Camunda) do NOT relieve developers from policy design; Comprehensive trade-off matrix: Sub-microsecond latency vs 200ms step overhead, near-zero cost vs $25/M transition billing, type safety & IDE refactoring vs YAML/JSON DSL hell, local testing via Testcontainers vs cloud sandboxes; In-flight workflow version drift and schema migration challenges; Two-tier hybrid architecture (Temporal/Step Functions coarse-grained durable lifecycle + `failsafe-go` fine-grained synchronous hot-path execution).
 
-9. **[Further Reading, Bibliography & Historical Media](./further_reading_and_bibliography.md)**
-   - Master bibliography (*Release It!*, *DDIA*, *Tanenbaum Distributed Systems*, *TailoredRead Eventual Consistency*, *Microservices Patterns*, *SRE Book*); Pioneer conference talks & media (Jesse Robbins: *Operations at Web Scale*, *GameDay: Master of Disaster*; John Allspaw: *10+ Deploys Per Day*); RFC 9111 HTTP caching & ETag validation; `golang.org/x/sync/singleflight` stampede mitigation patterns; Repeatable testing methodologies (Testcontainers, virtual clocks `clockwork`, deterministic PRNG jitter seeding, concurrency race testing under `-race`).
+9. **[The Economics of Resilience: SLA Cost Scaling, SDLC Attribution & Maturity Governance](./resilience_economics_and_maturity_levels.md)**
+   - The non-linear cost curve of availability ($Cost \propto \frac{1}{1 - \text{SLA}}$); Resilience cost attribution breakdown across Architecture & Infrastructure (35–40%), SDLC & Quality Gates (25–30%), Deployment Engineering (15–20%), Observability & Business KPIs (10–15%), and Operational Support (10–15%); Transitioning from misleading technical metrics (the "Silent 200 OK") to real-time Business SLIs (order velocity, revenue flow rate, fallback activation ratios); The 4-Stage Software Maturity Model (**PoC $\rightarrow$ Pilot $\rightarrow$ Production $\rightarrow$ Scaling**) with formal technical and business transition gate checklists; Error budget governance and ROI.
+
+10. **[Further Reading, Bibliography & Historical Media](./further_reading_and_bibliography.md)**
+    - Master bibliography (*Release It!*, *DDIA*, *Tanenbaum Distributed Systems*, *TailoredRead Eventual Consistency*, *Microservices Patterns*, *SRE Book*); Pioneer conference talks & media (Jesse Robbins: *Operations at Web Scale*, *GameDay: Master of Disaster*; John Allspaw: *10+ Deploys Per Day*); RFC 9111 HTTP caching & ETag validation; `golang.org/x/sync/singleflight` stampede mitigation patterns; Repeatable testing methodologies (Testcontainers, virtual clocks `clockwork`, deterministic PRNG jitter seeding, concurrency race testing under `-race`).
