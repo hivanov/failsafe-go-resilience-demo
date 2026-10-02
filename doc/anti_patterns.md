@@ -1,6 +1,6 @@
 # Common Anti-Patterns in Resilient System Design
 
-Building resilient software in Go requires understanding not just how to configure policies, but how flawed architectural assumptions and misconfigurations actively destabilize distributed systems. Below is an exhaustive breakdown of the most critical resilience anti-patterns encountered in production services.
+Building resilient software in Go requires understanding not just how to configure policies, but how flawed architectural assumptions and misconfigurations actively destabilize distributed systems. Below is an exhaustive breakdown of the most critical resilience anti-patterns encountered in production services, including infrastructure resource governance, Kubernetes limits, socket handling, and hardware exhaustion.
 
 ---
 
@@ -20,6 +20,12 @@ Building resilient software in Go requires understanding not just how to configu
 - [12. Context Disconnection & Socket Leaking](#12-context-disconnection--socket-leaking)
 - [13. Blind / Catch-All Error Retries (Retrying Deterministic Failures)](#13-blind--catch-all-error-retries-retrying-deterministic-failures)
 - [14. Cascading Circuit Breaker Trips (Shared Breakers Across Disparate Endpoints)](#14-cascading-circuit-breaker-trips-shared-breakers-across-disparate-endpoints)
+- [15. Kubernetes CPU Limit: CFS Quota Throttling](#15-kubernetes-cpu-limit-cfs-quota-throttling)
+- [16. Missing GOMEMLIMIT: OOMKilled Containers (Exit Code 137)](#16-missing-gomemlimit-oomkilled-containers-exit-code-137)
+- [17. Ephemeral Port & Socket Leaking (Unpooled HTTP Clients & Unclosed Bodies)](#17-ephemeral-port--socket-leaking-unpooled-http-clients--unclosed-bodies)
+- [18. Goroutine Explosion & Unbounded Concurrency (The Missing Bulkhead)](#18-goroutine-explosion--unbounded-concurrency-the-missing-bulkhead)
+- [19. GPU Resource Exhaustion: VRAM Saturation & Host PCIe Bottlenecks](#19-gpu-resource-exhaustion-vram-saturation--host-pcie-bottlenecks)
+- [20. Swap Thrashing & Memory Paging GC Latency](#20-swap-thrashing--memory-paging-gc-latency)
 
 ---
 
@@ -172,3 +178,103 @@ Building resilient software in Go requires understanding not just how to configu
 - **The Failure Mode:** If an optional reporting endpoint goes down, the shared circuit breaker trips to `OPEN`, inadvertently taking down the critical payment processing pipeline with it.
 - **Remediation:** Isolate circuit breakers per failure domain, per endpoint, or per microservice interface.
 - **Code Reference:** See [`pkg/policies/payment_policy.go`](../pkg/policies/payment_policy.go) where the circuit breaker is strictly bound to `PaymentGateway`.
+
+---
+
+## 15. Kubernetes CPU Limit: CFS Quota Throttling
+- **The Anti-Pattern:** Setting aggressive, tight CPU limits in Kubernetes manifests (e.g. `resources.limits.cpu: "500m"`) while running multithreaded Go applications with multiple goroutines.
+- **The Mechanics of the Failure Mode:** 
+  - Kubernetes enforces CPU limits using the Linux kernel Completely Fair Scheduler (CFS) quota mechanism over a default $100\text{ms}$ quota period (`cpu.cfs_period_us = 100000`).
+  - If a container is assigned `500m` CPU ($0.5$ cores), it is allocated $50\text{ms}$ of total CPU time per $100\text{ms}$ window.
+  - Go’s runtime (`GOMAXPROCS`) defaults to the **number of logical CPU cores on the host node** (e.g. 64 or 128 cores on a modern cloud VM), *not* the container's fractional CPU limit!
+  - When a burst of 10 goroutines wake up simultaneously, they run across 10 OS threads, consuming the container's entire $50\text{ms}$ quota in just $5\text{ms}$ of wall-clock time.
+  - The Linux kernel instantly **freezes/throttles the entire container process** for the remaining $95\text{ms}$ of the period.
+- **The Failure Mode:** Severe, inexplicable latency spikes ($100\text{ms}\text{--}500\text{ms}$) on P99 response times without high average CPU utilization. Goroutines miss SLA timeouts despite the node being mostly idle.
+- **Remediation:**
+  1. Use `go.uber.org/automaxprocs` in `main.go` to automatically tune `GOMAXPROCS` to match the container's CPU quota.
+  2. For latency-sensitive microservices, set `resources.requests.cpu` equal to `resources.limits.cpu` (Guaranteed QoS Class) or omit CPU limits entirely if cluster node governance permits.
+  3. Monitor `container_cpu_cfs_throttled_periods_total` in Prometheus.
+
+---
+
+## 16. Missing GOMEMLIMIT: OOMKilled Containers (Exit Code 137)
+- **The Anti-Pattern:** Setting Kubernetes memory limits (e.g. `resources.limits.memory: "1Gi"`) without configuring the Go runtime's memory limit (`GOMEMLIMIT`).
+- **The Mechanics of the Failure Mode:** 
+  - Prior to Go 1.19, the Go Garbage Collector (GC) was governed solely by `GOGC` (default `100`), which triggers a GC cycle only when heap memory grows by 100% since the last GC.
+  - The Go runtime is **cgroup-blind by default**; it does not know the container has a 1GiB hard limit.
+  - If live heap is $600\text{MB}$, `GOGC=100` targets the next collection at $1.2\text{GB}$.
+  - When traffic spikes and memory reaches $1,024\text{MB}$, the Linux kernel cgroup OOM killer instantly terminates the container (`Exit Code 137 / OOMKilled`), dropping all active in-flight checkout requests without warning.
+- **The Failure Mode:** Sudden, ungraceful pod restarts during traffic surges, dropping connections, aborting transactions, and creating restart cascading storms in Kubernetes.
+- **Remediation:**
+  - Always set `GOMEMLIMIT` in container environment variables to **80%–85% of the cgroup memory limit**:
+    ```yaml
+    env:
+      - name: GOMEMLIMIT
+        value: "850MiB" # For a 1GiB cgroup limit (leaves 15% buffer for binary, thread stacks, and OS)
+      - name: GOGC
+        value: "100"
+    ```
+  - This forces the Go GC to trigger aggressively as memory nears the cgroup ceiling, trading slight CPU cycles for zero OOMKill crashes.
+
+---
+
+## 17. Ephemeral Port & Socket Leaking (Unpooled HTTP Clients & Unclosed Bodies)
+- **The Anti-Pattern:** 
+  1. Instantiating a new `&http.Client{}` inside request handler functions instead of reusing a shared singleton transport.
+  2. Forgetting to read and close `resp.Body` on outbound HTTP calls (`defer resp.Body.Close()`).
+  3. Setting `Transport.DisableKeepAlives = true` or `MaxIdleConnsPerHost = 2` (default).
+- **The Failure Mode:**
+  - Every unpooled HTTP call opens a new TCP connection and ephemeral port (allocated from `net.ipv4.ip_local_port_range`, typically ~28,000 available ports).
+  - When closed, TCP sockets linger in `TIME_WAIT` state for $60\text{ seconds}$ (`2 * MSL`).
+  - Under modest load (e.g. 500 req/sec with retries), the container **exhausts all available ephemeral ports** in under a minute, throwing `dial tcp: dial: cannot assign requested address`.
+  - Unclosed `resp.Body` prevents underlying TCP socket reuse, ballooning open file descriptors until hitting `ulimit -n` (throwing `socket: too many open files`).
+- **Remediation:**
+  - Maintain a shared, pooled `http.Client` with tuned connection pool limits:
+    ```go
+    var SharedTransport = &http.Transport{
+        MaxIdleConns:        1000,
+        MaxIdleConnsPerHost: 200, // Default is 2, causing massive socket churn!
+        IdleConnTimeout:     90 * time.Second,
+        DisableKeepAlives:   false,
+    }
+    ```
+  - Always drain and close response bodies: `io.Copy(io.Discard, resp.Body); resp.Body.Close()`.
+
+---
+
+## 18. Goroutine Explosion & Unbounded Concurrency (The Missing Bulkhead)
+- **The Anti-Pattern:** Spawning raw `go func()` goroutines for background tasks (e.g. loyalty accrual, analytics, retries) without concurrency bounding (bulkhead) or context propagation.
+- **The Failure Mode:**
+  - While an idle goroutine is lightweight (~2KB stack), active goroutines executing JSON parsing, DB queries, or allocating memory buffers consume tens or hundreds of kilobytes.
+  - If a downstream service hangs, incoming requests spawn 50,000 concurrent goroutines in seconds.
+  - 50,000 goroutines allocate gigabytes of heap, triggering GC CPU thrashing and container OOMKills.
+- **Remediation:**
+  - Wrap all concurrent operations in **Bounded Bulkheads** (using worker pools, buffered semaphore channels, or `failsafe-go/bulkhead`).
+  - Always pass bounded contexts to background goroutines (`context.WithTimeout`).
+- **Code Reference:** See [`pkg/policies/loyalty_policy.go`](../pkg/policies/loyalty_policy.go) for bounded background execution.
+
+---
+
+## 19. GPU Resource Exhaustion: VRAM Saturation & Host PCIe Bottlenecks
+- **The Anti-Pattern:** Deploying Go inference workers interfacing with local GPU accelerators (e.g. PyTorch, ONNX Runtime, CUDA via cgo) without VRAM limits, memory pooling, or queue bulkheads.
+- **The Failure Modes:**
+  1. **CUDA Out of Memory (OOM):** Unlike CPU memory where allocations can fail gracefully or page, GPU VRAM allocations that exceed physical VRAM (e.g. 16GB or 24GB VRAM) throw fatal unrecoverable CUDA runtime exceptions that terminate the host Go process.
+  2. **PCIe Bus Contention:** Ingesting large uncompressed payload tensors across the host CPU-GPU PCIe bus without pinned memory (`cudaHostAlloc`) or asynchronous streaming (`cudaStreamNonBlocking`), causing 80% of execution time to be spent waiting on memory transfer rather than tensor computation.
+  3. **Lack of GPU Bulkheading:** Allowing 500 Go HTTP worker goroutines to invoke GPU inference concurrently. Because GPUs process workloads in synchronized warps/batches, massive unbatched concurrent GPU kernel launches thrash the GPU scheduler, driving P99 inference latency from $15\text{ms}$ to $3,000\text{ms}$.
+- **Remediation:**
+  - Place a strict **Bulkhead & Dynamic Batcher** in front of GPU kernels in Go: batch up to $N$ inference requests over a $5\text{ms}$ window.
+  - Pre-allocate unified CUDA memory pools at service startup.
+  - Bound concurrent kernel launches to match GPU hardware compute streams.
+
+---
+
+## 20. Swap Thrashing & Memory Paging GC Latency
+- **The Anti-Pattern:** Enabling Linux swap on Kubernetes worker nodes (`NodeSwap`) without cgroup v2 memory-swap limits, or relying on swap as a "safety buffer" for memory-constrained Go microservices.
+- **The Failure Mode:**
+  - When physical RAM is exhausted, the Linux kernel begins swapping anonymous heap pages and Go goroutine stacks to disk (SSD/NVMe).
+  - Go's garbage collector regularly traverses the entire heap space. When GC scanning touches swapped-out pages, it forces continuous random disk read I/O (page faults).
+  - This causes **catastrophic swap thrashing**: GC pause times explode from $0.5\text{ms}$ to **15,000ms (15 seconds)**!
+  - The Go binary appears completely frozen, failing liveness probes and breaching all upstream SLAs while CPU usage drops to 1% (stuck in `D` state / I/O wait).
+- **Remediation:**
+  - Disable swap on Kubernetes nodes (`swapoff -a` / `failSwapOn: true`), or configure cgroup v2 with strict memory-only limits (`memory.swap.max = 0`).
+  - Rely on `GOMEMLIMIT` and pod autoscaling (HPA) rather than disk swap to absorb memory volatility.

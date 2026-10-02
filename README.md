@@ -103,12 +103,13 @@ failsafe-go-demo/
 │       └── loyalty_policy.go        # ResilientLoyaltyService & async 200ms timeout
 └── doc/                             # In-depth architectural documentation
     ├── README.md                    # Deep-dive documentation index & TOC
-    ├── design_process_and_modularity.md # 80/20 rule, 6-phase design cycle & Go modularity
-    ├── anti_patterns.md             # Detailed guide on 14 resilience anti-patterns
+    ├── design_process_and_modularity.md # 80/20 rule, 7-phase design cycle & resource governance
+    ├── anti_patterns.md             # Detailed guide on 20 resilience anti-patterns
     ├── operational_resilience_and_support_processes.md # Support operations, alerts, runbooks & GameDays
     ├── acid_monolith_architecture.md# Single ACID database architecture & trade-offs
     ├── distributed_transactions_sagas.md # Sagas, 2PC, rollbacks, and outbox patterns
     ├── context_cancellation_best_practices.md # Go context & socket leak rules
+    ├── product_owner_interview_and_caching_fallbacks.md # 4 PO questions & multi-tier caching fallbacks (CDN, Redis, Memory, Solace)
     └── further_reading_and_bibliography.md # Master bibliography, Jesse Robbins talks, testing
 ```
 
@@ -124,8 +125,9 @@ failsafe-go-demo/
 
 All comprehensive deep-dive guides, distributed transaction strategies, database architecture trade-offs, resilience engineering methodologies, and curated literature references are indexed in **[`doc/README.md`](doc/README.md)**:
 
-- 📖 **[Resilience Design Process & Modularity Principles in Go](doc/design_process_and_modularity.md)** — The 80/20 Pareto rule in resilience engineering; The 6-phase iterative design cycle; Interface segregation and decorator modularity in Go.
-- 📖 **[Architectural Anti-Patterns in Resilient System Design](doc/anti_patterns.md)** — Breakdown of 14 fatal anti-patterns (unbounded retries, missing jitter, non-idempotent retries, locks & deadlocks, inadequate testing, five-nines fantasy, hunch-based timeouts, context disconnection, cascading shared circuit breakers).
+- 📖 **[Stakeholder Interview Framework & Caching Fallback Architectures in Go](doc/product_owner_interview_and_caching_fallbacks.md)** — The 4 mandatory Product Owner interview questions (Degraded behavior, Error classification, SLA & user patience budgets, Financial cost & risk trade-offs); Translation matrix from business answers to `failsafe-go` policy composition; Multi-tier caching fallback architectures: Tier 0 Edge CDN whole request-response caching (RFC 5861 `stale-if-error`, `stale-while-revalidate`, ETag conditional requests), Tier 1 Remote Redis/MongoDB caches with singleflight stampede suppression and cache circuit breakers, Tier 2 In-memory local caches (`sync.RWMutex` with bounded TTL), and Tier 3 Event-synchronized in-memory cache over Solace PubSub+ and Kafka guaranteed messaging.
+- 📖 **[Resilience Design Process & Modularity Principles in Go](doc/design_process_and_modularity.md)** — The 80/20 Pareto rule in resilience engineering; The 7-phase iterative design cycle; Resource governance deep-dive (Kubernetes CFS throttling, `GOMEMLIMIT`, socket pools, GPU VRAM, swap thrashing); Interface segregation and decorator modularity in Go.
+- 📖 **[Architectural Anti-Patterns in Resilient System Design](doc/anti_patterns.md)** — Breakdown of 20 fatal anti-patterns (unbounded retries, missing jitter, non-idempotent retries, locks & deadlocks, inadequate testing, five-nines fantasy, hunch-based timeouts, context disconnection, cascading shared circuit breakers, CFS throttling, OOMKills, socket leaks, goroutine explosions).
 - 📖 **[Coupling Software Resilience with Operational Support Processes](doc/operational_resilience_and_support_processes.md)** — Safe-to-Fail mindset; On-call ownership; Symptom-based alert hygiene; Progressive remediation (Manual Runbooks $\rightarrow$ GameDays $\rightarrow$ Automated Self-Healing).
 - 📖 **[Single-Database ACID Architecture vs. Distributed Microservices](doc/acid_monolith_architecture.md)** — Why single-database relational architectures win at moderate scale (< 500k DAU) with instant zero-code rollbacks (`ROLLBACK`) and kernel-level locking.
 - 📖 **[Disjoint Microservice Strategies: Eventual Consistency, Sagas & Distributed Rollbacks](doc/distributed_transactions_sagas.md)** — Sagas vs. 2PC, Forward ($T_i$) vs. Compensating ($C_i$) actions, Transactional Outbox pattern, and distributed rollback rules.

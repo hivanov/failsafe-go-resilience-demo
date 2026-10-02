@@ -52,7 +52,7 @@ func printResult(res checkout.OrderResult, err error) {
 }
 
 func main() {
-	fmt.Printf("%s%sFAILSAFE-GO ARCHITECTURE DEMO: 20-MINUTE LIVE SCENARIOS%s\n", ColorBold, ColorGreen, ColorReset)
+	fmt.Printf("%s%sFAILSAFE-GO ARCHITECTURE DEMO: 30-MINUTE LIVE SCENARIOS%s\n", ColorBold, ColorGreen, ColorReset)
 	fmt.Printf("Demonstrating Operation Time Budgeting, Policy Composition, and Single-Process Fault Tolerance\n")
 
 	telemetry := checkout.NewInMemoryTelemetry()
