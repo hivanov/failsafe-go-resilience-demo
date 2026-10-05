@@ -1,12 +1,13 @@
 # Software & Hardware Limits: Capacity Budgeting, Resource Governance & Load Verification
 
-This guide establishes an engineering and mathematical framework for **resource capacity budgeting**, calculating software and hardware limits (file descriptors, sockets, database connection pools, goroutines, kernel buffers), analyzing **shared logical resources** (database row-locks, credit card balances, single-writer domain entities), retrieving and inspecting cgroup limits from inside Kubernetes pods, modeling concurrent workload demand, proving architectural capacity prior to code implementation, monitoring scarce resources during load testing, and avoiding the catastrophic **"Blind Horizontal Scaling"** trap.
+This guide establishes an engineering and mathematical framework for **resource capacity budgeting**, calculating software and hardware limits (file descriptors, sockets, database connection pools, goroutines, kernel buffers), analyzing **shared logical resources** (database row-locks, credit card balances, single-writer domain entities), retrieving and inspecting cgroup limits from inside Kubernetes pods, actively monitoring scarce resources via **OpenTelemetry (OTel)** without duplicating native Kubernetes metrics, modeling concurrent workload demand, proving architectural capacity prior to code implementation, monitoring scarce resources during load testing, linking capacity to **operational support procedures**, and avoiding the catastrophic **"Blind Horizontal Scaling"** trap.
 
 ---
 
 ## Table of Contents
 
 - [1. Executive Summary: Plan Before Writing Code](#1-executive-summary-plan-before-writing-code)
+  - [1.1 The Operational Axiom: Knowing Limits is Less Than Half the Story](#11-the-operational-axiom-knowing-limits-is-less-than-half-the-story)
 - [2. The Physical & Kernel Limits of the Machine](#2-the-physical--kernel-limits-of-the-machine)
   - [2.1 File Descriptors (FDs) & Sockets (`ulimit -n`)](#21-file-descriptors-fds--sockets-ulimit--n)
   - [2.2 Ephemeral Port Exhaustion & TCP State Retention](#22-ephemeral-port-exhaustion--tcp-state-retention)
@@ -39,7 +40,16 @@ This guide establishes an engineering and mathematical framework for **resource 
   - [10.2 Process & File Descriptor Inspection](#102-process--file-descriptor-inspection)
   - [10.3 In-Process Go Telemetry & pprof Profiling Under Load](#103-in-process-go-telemetry--pprof-profiling-under-load)
   - [10.4 Load Testing Capacity Verification Checklist](#104-load-testing-capacity-verification-checklist)
-- [11. Headroom Telemetry & Continuous Capacity Governance](#11-headroom-telemetry--continuous-capacity-governance)
+- [11. Active Resource Monitoring via OpenTelemetry: The K8s Division of Labor](#11-active-resource-monitoring-via-opentelemetry-the-k8s-division-of-labor)
+  - [11.1 The Division of Labor: What K8s Native Telemetry Provides vs. What OTel Must Capture](#111-the-division-of-labor-what-k8s-native-telemetry-provides-vs-what-otel-must-capture)
+  - [11.2 In-Process OTel Metric Instruments (The Unseen Bottlenecks)](#112-in-process-otel-metric-instruments-the-unseen-bottlenecks)
+  - [11.3 Unifying K8s & In-Process Metrics via the OpenTelemetry Collector](#113-unifying-k8s--in-process-metrics-via-the-opentelemetry-collector)
+  - [11.4 Trace-Span Attribute Injection: Correlating Latency with Resource Pressure](#114-trace-span-attribute-injection-correlating-latency-with-resource-pressure)
+  - [11.5 Complete Go OpenTelemetry Resource Monitor Implementation](#115-complete-go-opentelemetry-resource-monitor-implementation)
+- [12. Continuous Capacity Governance & Operational Support Linkage](#12-continuous-capacity-governance--operational-support-linkage)
+  - [12.1 Remaining Headroom SLIs & Alerting Thresholds](#121-remaining-headroom-slis--alerting-thresholds)
+  - [12.2 Linking Capacity Metrics Directly to Support Runbooks](#122-linking-capacity-metrics-directly-to-support-runbooks)
+  - [12.3 Scheduled GameDay Capacity Drills](#123-scheduled-gameday-capacity-drills)
 
 ---
 
@@ -63,12 +73,36 @@ Every incoming HTTP request, database query, and third-party API call consumes t
 │  2. An engineer must calculate peak resource consumption BEFORE coding.     │
 │  3. Pod and cgroup limits must be discovered and budgeted at runtime.      │
 │  4. Shared logical locks cap throughput regardless of pod scaling count.   │
-│  5. Load testing is an experimental proof of a mathematical model, NOT     │
+│  5. Simply knowing the limits is less than half the story: active OTel     │
+│     monitoring, symptom alerting, and support runbooks are mandatory.      │
+│  6. Load testing is an experimental proof of a mathematical model, NOT     │
 │     an exploratory discovery mechanism to see where the system breaks.     │
-│  6. Scaling stateless application containers while ignoring stateful        │
+│  7. Scaling stateless application containers while ignoring stateful        │
 │     bottlenecks guarantees catastrophic database collapse.                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+### 1.1 The Operational Axiom: Knowing Limits is Less Than Half the Story
+
+A common organizational failure mode is treating capacity planning as a **static, one-time whiteboard calculation**. 
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         THE THREE PILLARS OF CAPACITY                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   [ 1. Mathematical Budgeting ] ──► [ 2. Active Real-Time OTel ] ──► [ 3. Support Procedures ]
+│      (Calculate FDs, DB Pools,        (Expose Headroom SLIs,           (Tested Runbooks,
+│       Memory, and Sockets)             Avoid K8s Duplication)           Automated Self-Healing)
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Static Math Alone Fails:** Knowing that your service needs at most 1,800 FDs is useless if an upstream partner degrades, retries storm, and open sockets drift past 4,096 in silence.
+2. **Active Real-Time Monitoring:** Production systems must continuously compute and export **Remaining Headroom SLIs** ($1 - \frac{\text{Used}}{\text{Max}}$) via OpenTelemetry.
+3. **Actionable Operational Support Procedures:** When headroom drops below safe thresholds ($< 25\%$), automated runbooks and on-call playbooks must immediately execute remediation (e.g. shedding non-critical traffic, tripping upstream circuit breakers, or scaling connection pooling proxies) before catastrophic brownouts occur.
 
 ---
 
@@ -800,9 +834,259 @@ Before running your load test runner (k6, Locust, Vegeta), complete this verific
 
 ---
 
-## 11. Headroom Telemetry & Continuous Capacity Governance
+## 11. Active Resource Monitoring via OpenTelemetry: The K8s Division of Labor
 
-Having capacity numbers mandates establishing **Headroom SLIs** to monitor resource exhaustion in real time before outages occur:
+While periodic CLI checks provide spot diagnostics, production systems require **continuous, automated active resource monitoring** via [OpenTelemetry (OTel)](https://opentelemetry.io/). 
+
+To achieve maximum telemetry efficiency without bloating compute resources, architects must establish a strict **Division of Labor** between Kubernetes-native infrastructure metrics and in-process OpenTelemetry telemetry.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   THE TELEMETRY DIVISION OF LABOR                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  KUBERNETES INFRASTRUCTURE (cAdvisor / kube-state-metrics):                 │
+│    ✔ Container CPU Usage & CFS Throttling (container_cpu_usage_seconds)     │
+│    ✔ Container Memory Working Set & Limits (container_memory_working_set)   │
+│    ✔ Ingress/Egress Network Bytes & Packets                                 │
+│    ✔ Pod Restarts, OOMKilled States, and Node Allocations                   │
+│    (DO NOT REINVENT OR DUPLICATE THESE IN APPLICATION CODE!)                │
+│                                                                             │
+│  IN-PROCESS OPENTELEMETRY (Go OTel SDK):                                    │
+│    ★ Process Open File Descriptors (/proc/self/fd vs ulimit)                │
+│    ★ Database Connection Pool Utilization & Wait Duration (pgxpool)        │
+│    ★ Ephemeral Socket Lifecycle States (TIME_WAIT, CLOSE_WAIT)              │
+│    ★ Go Runtime Internals (Active Goroutines, Heap Allocs, GC Pauses)       │
+│    ★ Shared Logical Resource Hold Times (Row-Lock Contention)               │
+│    ★ Computed Remaining Headroom SLIs (1 - Used/Max)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 11.1 The Division of Labor: What K8s Native Telemetry Provides vs. What OTel Must Capture
+
+Writing custom Go code to scrape container CPU or memory limits is an anti-pattern:
+1. **Rely on Kubernetes Infrastructure Telemetry:** Let the cluster's Prometheus / OTel Collector scrape **cAdvisor** and **kube-state-metrics** directly for container CPU quotas, memory working sets, and network throughput.
+2. **Focus In-Process OTel on the "Unseen Black Box":** Use the Go OpenTelemetry SDK strictly for metrics that Kubernetes cannot see from the outside—internal database connection pool wait queues, open file descriptor counts, goroutine expansion ratios, and row-level lock hold times.
+
+---
+
+### 11.2 In-Process OTel Metric Instruments (The Unseen Bottlenecks)
+
+| Resource Metric | OTel Instrument Type | Semantic Metric Name | Unit | Why K8s Cannot Provide It |
+| :--- | :--- | :--- | :--- | :--- |
+| **Open File Descriptors** | `ObservableGauge` | `process.open_file_descriptors` | `{count}` | K8s sees container limits, not internal process `/proc/self/fd` allocations. |
+| **FD Headroom Ratio** | `ObservableGauge` | `process.file_descriptors.headroom_ratio` | `1` | Real-time computed ratio ($1 - \frac{\text{open}}{\text{limit}}$). |
+| **DB Active Connections** | `ObservableUpDownCounter` | `db.client.connections.usage` | `{connections}` | Internal state of Go `pgxpool` / `database/sql` driver. |
+| **DB Pool Headroom** | `ObservableGauge` | `db.client.connections.headroom_ratio` | `1` | Ratio of available database pool connections before starvation. |
+| **DB Connection Wait Time** | `Histogram` | `db.client.connections.wait_duration` | `ms` | Time goroutines spend blocked waiting for a free DB socket. |
+| **Row Lock Hold Duration** | `Histogram` | `db.client.lock.hold_duration` | `ms` | Time an active SQL transaction holds exclusive row locks. |
+| **Active Goroutines** | `ObservableGauge` | `go.goroutine.count` | `{goroutines}` | Internal Go scheduler runtime state. |
+
+---
+
+### 11.3 Unifying K8s & In-Process Metrics via the OpenTelemetry Collector
+
+Deploy the **OpenTelemetry Collector** as a Kubernetes DaemonSet or Sidecar. The collector ingests both streams and correlates them using the `k8sattributes` processor:
+
+```yaml
+# OpenTelemetry Collector Pipeline Configuration
+receivers:
+  # 1. Ingest In-Process Go Metrics & Traces via OTLP
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # 2. Ingest Kubernetes Native Container Metrics from cAdvisor
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'kubernetes-cadvisor'
+          kubernetes_sd_configs:
+            - role: node
+          scheme: https
+          tls_config:
+            ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+processors:
+  # Correlate In-Process OTel Spans with K8s Pod Metadata
+  k8sattributes:
+    auth_type: "serviceAccount"
+    passthrough: false
+    extract:
+      metadata:
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.namespace.name
+        - k8s.node.name
+        - k8s.deployment.name
+
+  batch:
+    send_batch_size: 1024
+    timeout: 10s
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+  otlp:
+    endpoint: "tempo:4317"
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [k8sattributes, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [k8sattributes, batch]
+      exporters: [otlp]
+```
+
+---
+
+### 11.4 Trace-Span Attribute Injection: Correlating Latency with Resource Pressure
+
+When a checkout transaction experiences a timeout or triggers a `failsafe-go` Fallback, the engineer analyzing the trace must know: **Was this caused by downstream partner latency, or was our pod out of database connections?**
+
+By attaching instantaneous resource headroom attributes to active OpenTelemetry spans, the answer is immediately visible in the trace:
+
+```go
+func (o *CheckoutOrchestrator) ProcessOrder(ctx context.Context, req OrderRequest) (OrderResult, error) {
+    tr := otel.Tracer("checkout-orchestrator")
+    ctx, span := tr.Start(ctx, "ProcessOrder")
+    defer span.End()
+
+    // Capture instantaneous in-process resource headroom at span start
+    dbHeadroom := o.pool.GetHeadroomRatio() // e.g. 0.05 (Only 5% connections free!)
+    openFDs := o.metrics.GetOpenFDCount()
+
+    span.SetAttributes(
+        attribute.Float64("resource.db_pool.headroom_ratio", dbHeadroom),
+        attribute.Int64("resource.open_fds", int64(openFDs)),
+        attribute.Bool("resource.db_pool.is_starved", dbHeadroom < 0.10),
+    )
+
+    // Execute resilient checkout workflow...
+    return o.orchestrate(ctx, req)
+}
+```
+
+---
+
+### 11.5 Complete Go OpenTelemetry Resource Monitor Implementation
+
+Below is a complete, production-ready Go telemetry module registering asynchronous OTel observable gauges for in-process scarce resources:
+
+```go
+package telemetry
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"runtime"
+	"syscall"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+)
+
+type DBStatsProvider interface {
+	ActiveConnections() int
+	MaxConnections() int
+}
+
+type OTelResourceMonitor struct {
+	meter       metric.Meter
+	dbProvider  DBStatsProvider
+}
+
+// NewOTelResourceMonitor registers asynchronous OTel gauges for scarce resource monitoring.
+func NewOTelResourceMonitor(meterName string, db DBStatsProvider) (*OTelResourceMonitor, error) {
+	meter := otel.GetMeterProvider().Meter(meterName)
+	m := &OTelResourceMonitor{
+		meter:      meter,
+		dbProvider: db,
+	}
+
+	// 1. Register Process Open File Descriptors Observable Gauge
+	_, err := meter.Int64ObservableGauge(
+		"process.open_file_descriptors",
+		metric.WithDescription("Instantaneous count of open file descriptors in /proc/self/fd"),
+		metric.WithUnit("{count}"),
+		metric.WithInt64Callback(func(ctx context.Context, observer metric.Int64Observer) error {
+			entries, readErr := os.ReadDir("/proc/self/fd")
+			if readErr == nil {
+				observer.Observe(int64(len(entries)))
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register open_file_descriptors gauge: %w", err)
+	}
+
+	// 2. Register Process Max File Descriptors (ulimit -n)
+	_, err = meter.Int64ObservableGauge(
+		"process.max_file_descriptors",
+		metric.WithDescription("Soft OS file descriptor limit (ulimit -n)"),
+		metric.WithUnit("{count}"),
+		metric.WithInt64Callback(func(ctx context.Context, observer metric.Int64Observer) error {
+			var rLimit syscall.Rlimit
+			if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit); err == nil {
+				observer.Observe(int64(rLimit.Cur))
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register max_file_descriptors gauge: %w", err)
+	}
+
+	// 3. Register Database Connection Pool Headroom Ratio Observable Gauge
+	_, err = meter.Float64ObservableGauge(
+		"db.client.connections.headroom_ratio",
+		metric.WithDescription("Ratio of free connections remaining in database pool (1.0 = empty, 0.0 = exhausted)"),
+		metric.WithUnit("1"),
+		metric.WithFloat64Callback(func(ctx context.Context, observer metric.Float64Observer) error {
+			if m.dbProvider != nil {
+				max := m.dbProvider.MaxConnections()
+				if max > 0 {
+					active := m.dbProvider.ActiveConnections()
+					headroom := 1.0 - (float64(active) / float64(max))
+					observer.Observe(headroom, metric.WithAttributes(
+						attribute.String("pool.name", "primary_postgres"),
+					))
+				}
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register db pool headroom gauge: %w", err)
+	}
+
+	return m, nil
+}
+```
+
+---
+
+## 12. Continuous Capacity Governance & Operational Support Linkage
+
+Resource limits, capacity budgets, and OpenTelemetry metrics are meaningless without clear **Operational Support Linkage**. When scarce resources near exhaustion, support procedures must take over.
+
+---
+
+### 12.1 Remaining Headroom SLIs & Alerting Thresholds
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -812,14 +1096,56 @@ Having capacity numbers mandates establishing **Headroom SLIs** to monitor resou
 
 1. **Database Connection Headroom:**
    - $\text{DB Headroom} = 1 - \frac{\text{Active Pool Connections}}{\text{Max Pool Size}}$
-   - *Alert Threshold:* Trigger warning alert when headroom $< 25\%$ for $> 60\text{ seconds}$.
+   - *Warning Alert:* Headroom $< 25\%$ for $> 60\text{ seconds}$.
+   - *Critical Page:* Headroom $< 10\%$ for $> 15\text{ seconds}$ (Trigger immediate circuit trip).
 2. **File Descriptor Headroom:**
    - $\text{FD Headroom} = 1 - \frac{\text{Current Open FDs}}{\text{ulimit -n Limit}}$
-   - *Alert Threshold:* Trigger critical alert when headroom $< 30\%$.
+   - *Warning Alert:* Headroom $< 30\%$.
+   - *Critical Page:* Headroom $< 15\%$.
 3. **Ephemeral Port Turnover Rate:**
-   - Track `netstat -an | grep TIME_WAIT | wc -l`. Alert if active `TIME_WAIT` sockets exceed $50\%$ of available ephemeral range.
+   - Track active sockets in `TIME_WAIT`. Alert if sockets exceed $50\%$ of available ephemeral range.
 4. **Goroutine Expansion Ratio:**
    - Ratio of active goroutines to active in-flight HTTP requests ($\frac{\text{Goroutines}}{\text{Active Ingress Requests}}$). 
    - A healthy service maintains a ratio between $1.5\text{ and }3.0$. A ratio exceeding $10.0$ indicates goroutine leaks waiting on un-cancelled contexts.
 5. **Row-Lock Contention Rate:**
    - Track PostgreSQL `pg_stat_activity` waiting on `Lock:transactionid` / `Lock:tuple`. Alert if lock queue wait times exceed $20\text{ms}$.
+
+---
+
+### 12.2 Linking Capacity Metrics Directly to Support Runbooks
+
+Every Prometheus / OpenTelemetry headroom alert must link directly to an unambiguous, executable **Operational Support Runbook**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SAMPLE HEADROOM RUNBOOK: DB POOL EXHAUSTION                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ALERT: DatabaseConnectionHeadroomLow (< 15% free connections for 30s)      │
+│  SEVERITY: P1 / Page                                                        │
+│                                                                             │
+│  DIAGNOSTIC STEPS:                                                          │
+│  1. Check PostgreSQL Lock Contention:                                       │
+│     SELECT pid, age(clock_timestamp(), query_start), query, state           │
+│     FROM pg_stat_activity WHERE wait_event_type = 'Lock';                   │
+│                                                                             │
+│  2. Identify Hot Row Contention:                                            │
+│     SELECT relation::regclass, mode, count(*) FROM pg_locks                 │
+│     GROUP BY relation, mode ORDER BY count(*) DESC;                         │
+│                                                                             │
+│  MITIGATION ACTIONS:                                                        │
+│  • Action A: Enable Shed-Load flag to drop non-critical loyalty point writes.│
+│  • Action B: Terminate orphaned idle transactions (> 60s idle in tx):       │
+│    SELECT pg_terminate_backend(pid) FROM pg_stat_activity                   │
+│    WHERE state = 'idle in transaction' AND query_start < now() - interval '1m';
+│  • Action C: Scale PgBouncer transaction-mode pool allocation.              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 12.3 Scheduled GameDay Capacity Drills
+
+Organizations must validate that support procedures work under simulated capacity exhaustion:
+- **GameDay Scenario 1 (Socket Exhaustion):** Inject artificial latency on downstream mock gateways to force socket buildup and verify that `process.open_file_descriptors` alerts fire before container crash.
+- **GameDay Scenario 2 (Row-Lock Storm):** Inject 1,000 concurrent updates against a single locked SKU row to verify that `NOWAIT` fast-fails cleanly without draining database connection pools.
+- **GameDay Scenario 3 (OOMKill Pressure):** Artificially throttle pod memory to verify that `GOMEMLIMIT` triggers garbage collection and prevents pod terminations.
