@@ -1,6 +1,6 @@
 # Software & Hardware Limits: Capacity Budgeting, Resource Governance & Load Verification
 
-This guide establishes an engineering and mathematical framework for **resource capacity budgeting**, calculating software and hardware limits (file descriptors, sockets, database connection pools, goroutines, kernel buffers), analyzing **shared logical resources** (database row-locks, credit card balances, single-writer domain entities), retrieving and inspecting cgroup limits from inside Kubernetes pods, actively monitoring scarce resources via **OpenTelemetry (OTel)** without duplicating native Kubernetes metrics, modeling concurrent workload demand, proving architectural capacity prior to code implementation, monitoring scarce resources during load testing, linking capacity to **operational support procedures**, and avoiding the catastrophic **"Blind Horizontal Scaling"** trap.
+This guide establishes an engineering and mathematical framework for **resource capacity budgeting**, calculating software and hardware limits (file descriptors, sockets, database connection pools, goroutines, kernel buffers), analyzing **shared logical resources** (database row-locks, credit card balances, single-writer domain entities), retrieving and inspecting cgroup limits from inside Kubernetes pods, actively monitoring scarce resources via **OpenTelemetry (OTel)** without duplicating native Kubernetes metrics, performing **resource-driven service decomposition** (Event Storming for physical seams), implementing **protective policies outside the executable** (Edge/Gateway rate limiting, concurrency bulkheads, outlier detection), modeling concurrent workload demand, proving architectural capacity prior to code implementation, monitoring scarce resources during load testing, linking capacity to **operational support procedures**, and avoiding the catastrophic **"Blind Horizontal Scaling"** trap.
 
 ---
 
@@ -50,6 +50,20 @@ This guide establishes an engineering and mathematical framework for **resource 
   - [12.1 Remaining Headroom SLIs & Alerting Thresholds](#121-remaining-headroom-slis--alerting-thresholds)
   - [12.2 Linking Capacity Metrics Directly to Support Runbooks](#122-linking-capacity-metrics-directly-to-support-runbooks)
   - [12.3 Scheduled GameDay Capacity Drills](#123-scheduled-gameday-capacity-drills)
+- [13. Resource-Driven Service Decomposition: Splitting & Combining Functionalities](#13-resource-driven-service-decomposition-splitting--combining-functionalities)
+  - [13.1 Physical Demands vs. Business Domains (When DDD Isn't Enough)](#131-physical-demands-vs-business-domains-when-ddd-isnt-enough)
+  - [13.2 Memory-Intensive, Compute-Bound & I/O Contamination](#132-memory-intensive-compute-bound--io-contamination)
+  - [13.3 Event Storming as an Architectural Seam Discovery Framework](#133-event-storming-as-an-architectural-seam-discovery-framework)
+  - [13.4 Splitting Away from the Main Hot-Path Binary via Event Streaming](#134-splitting-away-from-the-main-hot-path-binary-via-event-streaming)
+  - [13.5 When to Consolidate Functionality (The Modular Monolith Sweet Spot)](#135-when-to-consolidate-functionality-the-modular-monolith-sweet-spot)
+- [14. Policy Outside the Executable: External Protective Boundaries & Ingress Shed-Loading](#14-policy-outside-the-executable-external-protective-boundaries--ingress-shed-loading)
+  - [14.1 The Limits of In-Process Resilience (Too Late at the TCP Handshake)](#141-the-limits-of-in-process-resilience-too-late-at-the-tcp-handshake)
+  - [14.2 Edge & Gateway Protections (Envoy / Reverse Proxy / API Gateway Layers)](#142-edge--gateway-protections-envoy--reverse-proxy--api-gateway-layers)
+  - [14.3 Ingress Concurrency Bulkheads & TCP SYN Limiting](#143-ingress-concurrency-bulkheads--tcp-syn-limiting)
+  - [14.4 Adaptive Rate Limiting & Token Buckets](#144-adaptive-rate-limiting--token-buckets)
+  - [14.5 Priority Queuing & Shed-Load Ingress Headers](#145-priority-queuing--shed-load-ingress-headers)
+  - [14.6 Outlier Detection & External Circuit Breaking](#146-outlier-detection--external-circuit-breaking)
+  - [14.7 Linux Kernel TCP Backlog & SYN Flood Governance](#147-linux-kernel-tcp-backlog--syn-flood-governance)
 
 ---
 
@@ -75,9 +89,13 @@ Every incoming HTTP request, database query, and third-party API call consumes t
 │  4. Shared logical locks cap throughput regardless of pod scaling count.   │
 │  5. Simply knowing the limits is less than half the story: active OTel     │
 │     monitoring, symptom alerting, and support runbooks are mandatory.      │
-│  6. Load testing is an experimental proof of a mathematical model, NOT     │
+│  6. Functionalities must be decomposed based on physical demands (Event    │
+│     Storming seams) to prevent noisy-neighbor memory and CPU collapses.     │
+│  7. Policies outside the executable must protect the process before raw     │
+│     TCP connections exhaust kernel socket buffers and file descriptors.    │
+│  8. Load testing is an experimental proof of a mathematical model, NOT     │
 │     an exploratory discovery mechanism to see where the system breaks.     │
-│  7. Scaling stateless application containers while ignoring stateful        │
+│  9. Scaling stateless application containers while ignoring stateful        │
 │     bottlenecks guarantees catastrophic database collapse.                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1149,3 +1167,224 @@ Organizations must validate that support procedures work under simulated capacit
 - **GameDay Scenario 1 (Socket Exhaustion):** Inject artificial latency on downstream mock gateways to force socket buildup and verify that `process.open_file_descriptors` alerts fire before container crash.
 - **GameDay Scenario 2 (Row-Lock Storm):** Inject 1,000 concurrent updates against a single locked SKU row to verify that `NOWAIT` fast-fails cleanly without draining database connection pools.
 - **GameDay Scenario 3 (OOMKill Pressure):** Artificially throttle pod memory to verify that `GOMEMLIMIT` triggers garbage collection and prevents pod terminations.
+
+---
+
+## 13. Resource-Driven Service Decomposition: Splitting & Combining Functionalities
+
+A foundational principle of resilient architecture is that **service boundaries should not be decided solely by business domains (Bounded Contexts), but also by physical resource characteristics.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    RESOURCE-DRIVEN SERVICE DECOMPOSITION                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+ [ MONOLITHIC DOMAIN ANTI-PATTERN (Same Process Contamination) ]
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  Go Binary: "Order Management"                                          │
+  │    ├── Checkout Hot-Path (Requires: 48KB RAM, 20ms CPU, < 500ms SLA)    │
+  │    └── Invoice PDF Generator (Requires: 450MB RAM, C-Go, 3.5s CPU)      │
+  │                                                                         │
+  │  💥 Flash Sale: 200 PDF generation requests consume 90GB RAM            │
+  │  💥 Result: Linux OOMKill (Exit Code 137) TERMINATES ENTIRE CHECKOUT!   │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+ [ SEPARATED PHYSICAL ARCHITECTURES (Event-Driven Seam) ]
+  ┌──────────────────────────────┐        Solace / Kafka        ┌──────────────────────────────┐
+  │  Service A: Checkout Core    │ ───► Event: OrderPlaced ───► │  Service B: Invoice Worker   │
+  │  • Strict 400ms SLA          │                              │  • Async Background Queue    │
+  │  • Lean 128MB RAM Footprint  │                              │  • Isolated 2GB RAM Pods     │
+  │  • High-Priority Scheduling  │                              │  • Low-Priority Autoscaling  │
+  └──────────────────────────────┘                              └──────────────────────────────┘
+```
+
+---
+
+### 13.1 Physical Demands vs. Business Domains (When DDD Isn't Enough)
+
+Domain-Driven Design (DDD) dictates that all logic belonging to the "Order Processing" aggregate belongs together. However, **hardware physics does not care about domain boundaries**:
+1. **Heterogeneous Resource Footprints:** A single business domain often combines sub-millisecond OLTP database transactions with memory-intensive document rendering, ML feature extraction, or video transcoding.
+2. **The "Noisy Neighbor" in the Same Address Space:** In Go, memory allocated by a heavy image-processing goroutine or large JSON payload sits in the same heap as your critical payment execution. A spike in background report generation triggers intensive Garbage Collection (GC) STW pauses that breach sub-second SLA timeouts on customer checkout.
+
+---
+
+### 13.2 Memory-Intensive, Compute-Bound & I/O Contamination
+
+Decompose functionality away from the main binary whenever an operation exhibits any of these physical traits:
+
+| Resource Characteristic | Example Workload | Why it Must Be Split Away |
+| :--- | :--- | :--- |
+| **High Memory Allocation** | PDF Invoicing, Excel Exporters, CSV Streaming | Triggers GC thrashing and OOMKills on the main process. |
+| **Compute / CPU Bound** | Cryptographic Hashing, Image Resizing, ML Scoring | Saturates CFS CPU quotas, freezing synchronous HTTP goroutines. |
+| **Unbounded I/O Latency** | Webhooks to 3rd-party merchants, Email / SMS Delivery | Holds open file descriptors and goroutines for tens of seconds. |
+| **C-Go / Foreign Function Interface** | ImageMagick, OpenCV, TensorFlow Lite | Bypasses Go scheduler; thread panics crash the entire host OS process. |
+
+---
+
+### 13.3 Event Storming as an Architectural Seam Discovery Framework
+
+To safely decompose services without creating distributed transaction nightmares, use **Event Storming** (pioneered by Alberto Brandolini).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       EVENT STORMING ARTIFACT SCHEMA                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  [ Blue Sticky ]  ──►  [ Yellow Sticky ]  ──►  [ Orange Sticky ]  ──►  [ Purple Sticky ]
+│     (Command)            (Aggregate)             (Domain Event)          (Policy / Saga)
+│   "PlaceOrder"        "OrderAggregate"           "OrderPlaced"        "When OrderPlaced,
+│                                                                        Generate Invoice"
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### What is Event Storming?
+Event Storming is a rapid, collaborative modeling workshop where domain experts, software architects, and operations engineers map out complex business processes using color-coded sticky notes on an unbounded modeling surface:
+- **Orange Stickies (Domain Events):** Observable facts that happened in the past (e.g., `OrderPlaced`, `PaymentCaptured`, `StockDeducted`).
+- **Blue Stickies (Commands):** Intentions triggered by users or external systems (e.g., `SubmitOrder`, `AuthorizePayment`).
+- **Yellow Stickies (Aggregates):** State boundaries that enforce business invariants transactionally.
+- **Purple / Lilac Stickies (Policies / Sagas):** Reactive rules that say: *"Whenever [Event X] happens, execute [Command Y]"*.
+
+#### Finding Physical Architectural Seams:
+During Event Storming, any Policy triggered by a Domain Event that does **NOT** require synchronous feedback to the end-user represents a **Natural Physical Seam**. 
+
+The synchronous boundary ends at `OrderPlaced`. Everything downstream (`GenerateInvoice`, `SendOrderConfirmationEmail`, `CalculateLoyaltyPoints`) is split away into independent asynchronous event consumers.
+
+---
+
+### 13.4 Splitting Away from the Main Hot-Path Binary via Event Streaming
+
+Once an event seam is identified:
+1. **The Core Hot-Path Binary:** Executes only the minimal synchronous critical path (Input validation ➔ Payment Capture ➔ SQL Stock Lock ➔ Publish `OrderPlaced` event to Solace/Kafka) and returns `200 OK` in $< 150\text{ms}$.
+2. **The Asynchronous Worker Binary:** Subscribes to `OrderPlaced` over guaranteed messaging, running in dedicated Kubernetes pods provisioned with high memory limits (e.g. 4GB RAM) and scaled independently via KEDA queue-depth metrics.
+
+---
+
+### 13.5 When to Consolidate Functionality (The Modular Monolith Sweet Spot)
+
+Do **NOT** split services if the resource profiles are homogeneous:
+- If Operation A and Operation B both require $< 5\text{ms}$ CPU, $< 32\text{KB}$ RAM, and communicate with the same PostgreSQL database, keep them in the **same Go binary** using segregated packages (Modular Monolith).
+- Splitting homogeneous workloads into separate microservices introduces network serialization overhead, gRPC latency, and dual-write consistency bugs with zero resource isolation benefit.
+
+---
+
+## 14. Policy Outside the Executable: External Protective Boundaries & Ingress Shed-Loading
+
+In-process resilience libraries like `failsafe-go` provide essential micro-level protection. However, **in-process policies arrive too late when the physical container itself is saturated.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│               THE "TOO LATE AT THE TCP HANDSHAKE" PROBLEM                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  50,000 Ingress TCP SYN Packets / sec (Traffic Surge / DDoS)
+                 │
+                 ▼
+     [ Linux Kernel Network Stack ]
+     • Allocates TCP Socket Buffer (rmem/wmem: 128KB/conn)
+     • Assigns OS File Descriptor
+     • Delivers to Go Ingress HTTP Listener
+                 │
+                 ▼
+       [ Go Application Process ] ──► (Heap memory balloons by 4GB!)
+       • Spawns Ingress Goroutine
+       • Reads HTTP Headers
+       • Enters failsafe-go Policy...
+                 │
+                 ▼
+       💥 CRASH: OOMKill / Socket Exhaustion Occurs BEFORE failsafe-go
+          Can Execute Its Reject/Fallback Policy!
+```
+
+---
+
+### 14.1 The Limits of In-Process Resilience (Too Late at the TCP Handshake)
+
+When a Go application is at 95% memory utilization or its database connection pool is completely starved:
+- Every new incoming TCP connection accepted by `net.Listen` consumes non-swappable kernel RAM and an OS file descriptor.
+- Relying on application code to return an HTTP 503 or JSON error still forces the process to perform TLS termination, HTTP frame parsing, and JSON marshaling.
+- **The Core Rule:** When a host process is saturated, **traffic must be shed EXTERNALLY before the TCP connection ever reaches the Go runtime.**
+
+---
+
+### 14.2 Edge & Gateway Protections (Envoy / Reverse Proxy / API Gateway Layers)
+
+Place external policy boundaries at the **API Gateway / Ingress Reverse Proxy** (e.g. Envoy Proxy, Traefik, NGINX, Cloudflare, AWS ALB, Istio Service Mesh):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      TWO-TIER POLICY ENFORCEMENT MODEL                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+ [ TIER 1: POLICY OUTSIDE THE EXECUTABLE (Envoy / Edge Gateway) ]
+  • Drops excess TCP connections at wire speed in C++ kernel space
+  • Enforces global token-bucket rate limits per client IP
+  • Ejects failing pods via Outlier Detection (Circuit Breaking outside app)
+  • Priority Queue Shed-Loading: Drops Tier 3 traffic on low headroom
+       │
+       │ Filtered Safe Traffic (Guaranteed within Pod Capacity)
+       ▼
+ [ TIER 2: POLICY INSIDE THE EXECUTABLE (failsafe-go in Go Process) ]
+  • SLA Time Budgeting (Overall Operation Timeout: 400ms)
+  • Downstream Dependency Retries with Backoff + Jitter
+  • Local In-Memory / Redis Stale Cache Fallbacks
+  • Granular Database Row-Lock Timeouts
+```
+
+---
+
+### 14.3 Ingress Concurrency Bulkheads & TCP SYN Limiting
+
+Configure external reverse proxies with hard concurrency limits matching your pod's mathematical capacity:
+
+```yaml
+# Envoy Proxy Ingress Circuit Breaker Configuration
+circuit_breakers:
+  thresholds:
+    - priority: DEFAULT
+      max_connections: 250        # Max active TCP connections to pod
+      max_pending_requests: 50    # Max requests waiting in gateway queue
+      max_requests: 200           # Max concurrent in-flight HTTP requests
+      max_retries: 2
+```
+
+When active connections reach 250, Envoy immediately rejects incoming requests at the edge with `HTTP 503 Service Unavailable`, shielding the Go container from kernel socket buffer exhaustion.
+
+---
+
+### 14.4 Adaptive Rate Limiting & Token Buckets
+
+Implement external distributed rate limiters (e.g. Envoy Global Rate Limit Service backed by Redis):
+- Enforce strict per-second request ceilings per API key or IP address ($100\text{ req/sec}$).
+- Reject abusive clients at the edge with `HTTP 429 Too Many Requests` without consuming downstream application CPU cycles.
+
+---
+
+### 14.5 Priority Queuing & Shed-Load Ingress Headers
+
+When backend OpenTelemetry metrics report that database connection pool headroom is $< 15\%$:
+1. The Ingress Gateway inspects the request priority header: `X-Priority: low` (e.g., browsing recommendations, loyalty point accruals).
+2. The Gateway **drops low-priority requests at the ingress edge**, reserving 100% of remaining pod socket and database pool headroom for high-priority revenue checkouts (`X-Priority: critical`).
+
+---
+
+### 14.6 Outlier Detection & External Circuit Breaking
+
+Configure external load balancers with **Outlier Detection**:
+- If a specific Go pod returns 5 consecutive HTTP 5xx errors or its readiness probe latency exceeds 500ms, Envoy **ejects the pod from the upstream routing pool for 30 seconds**.
+- This stops incoming network traffic instantly, giving the struggling Go container time to drain its garbage collector, release stuck database connections, and recover without being overwhelmed by incoming socket traffic.
+
+---
+
+### 14.7 Linux Kernel TCP Backlog & SYN Flood Governance
+
+At the host operating system level, tune the Linux kernel connection queue boundaries to prevent unhandled SYN floods:
+
+```bash
+# Increase max pending TCP connection backlog
+sysctl -w net.core.somaxconn=4096
+
+# Increase max half-open connection SYN backlog
+sysctl -w net.ipv4.tcp_max_syn_backlog=8192
+
+# Enable TCP SYN Cookies to prevent SYN-flood socket memory exhaustion
+sysctl -w net.ipv4.tcp_syncookies=1
+```
