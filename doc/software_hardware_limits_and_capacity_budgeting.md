@@ -120,7 +120,7 @@ A common organizational failure mode is treating capacity planning as a **static
 
 1. **Static Math Alone Fails:** Knowing that your service needs at most 1,800 FDs is useless if an upstream partner degrades, retries storm, and open sockets drift past 4,096 in silence.
 2. **Active Real-Time Monitoring:** Production systems must continuously compute and export **Remaining Headroom SLIs** ($1 - \frac{\text{Used}}{\text{Max}}$) via OpenTelemetry.
-3. **Actionable Operational Support Procedures:** When headroom drops below safe thresholds ($< 25\%$), automated runbooks and on-call playbooks must immediately execute remediation (e.g. shedding non-critical traffic, tripping upstream circuit breakers, or scaling connection pooling proxies) before catastrophic brownouts occur.
+3. **Actionable Operational Support Procedures:** When headroom drops below safe thresholds (< 25%), automated runbooks and on-call playbooks must immediately execute remediation (e.g. shedding non-critical traffic, tripping upstream circuit breakers, or scaling connection pooling proxies) before catastrophic brownouts occur.
 
 ---
 
@@ -137,7 +137,11 @@ In Linux, everything is a file descriptor:
 
 If the operating system or container cgroup limit is set to `ulimit -n 1024` (a common container default), a service handling 400 concurrent requests—each calling 1 database and 2 HTTP APIs—requires:
 
-$$\text{Required FDs} = 400 \times (1_{\text{ingress}} + 1_{\text{db}} + 2_{\text{egress}}) = 1,600\text{ FDs}$$
+
+$$
+\text{Required FDs} = 400 \times (1_{\text{ingress}} + 1_{\text{db}} + 2_{\text{egress}}) = 1,600\text{ FDs}
+$$
+
 
 The service crashes instantly with `socket: too many open files`, completely failing health checks.
 
@@ -171,7 +175,11 @@ When a Go service establishes an outbound HTTP connection to a downstream provid
 - At 500 requests/second, the service creates 500 closed sockets per second.
 - Over the 60-second `TIME_WAIT` retention window, the kernel accumulates:
 
-$$\text{Active TIME\_WAIT Sockets} = 500\text{ req/sec} \times 60\text{ sec} = 30,000\text{ sockets}$$
+
+$$
+\text{Active TIME\_WAIT Sockets} = 500\text{ req/sec} \times 60\text{ sec} = 30,000\text{ sockets}
+$$
+
 
 This **exceeds the entire ephemeral port range**, triggering `dial tcp: cannot assign requested address` across all outbound calls.
 
@@ -211,7 +219,11 @@ Go goroutines start with an initial stack size of **2,048 bytes (2KB)**. However
 2. **Blocked Sockets:** If 10,000 requests hang on a slow third-party API for 30 seconds, 10,000 goroutines remain alive.
 3. If each blocked goroutine has expanded to 64KB:
 
-$$\text{Memory Footprint} = 10,000 \times 64\text{ KB} = 640\text{ MB of Heap Memory}$$
+
+$$
+\text{Memory Footprint} = 10,000 \times 64\text{ KB} = 640\text{ MB of Heap Memory}
+$$
+
 
 When combined with JSON unmarshaling buffers, request payloads, and telemetry traces, this triggers an immediate **Kubernetes OOMKill (Exit Code 137)**.
 
@@ -223,7 +235,11 @@ Every open TCP socket has an associated kernel read buffer (`rmem`) and write bu
 - Default Linux `tcp_rmem` / `tcp_wmem`: 4KB minimum, 87KB default, up to 4MB max.
 - 5,000 active sockets with default 128KB combined buffers consume:
 
-$$\text{Kernel Socket Buffer RAM} = 5,000 \times 128\text{ KB} = 640\text{ MB of non-swappable Kernel RAM}$$
+
+$$
+\text{Kernel Socket Buffer RAM} = 5,000 \times 128\text{ KB} = 640\text{ MB of non-swappable Kernel RAM}
+$$
+
 
 ---
 
@@ -288,7 +304,11 @@ If environment variables are omitted, your application can directly inspect the 
 | **CPU Period** | `/sys/fs/cgroup/cpu/cpu.cfs_period_us` | `/sys/fs/cgroup/cpu.max` (2nd field) | Usually `100000` (100ms) |
 | **CPU Throttling** | `/sys/fs/cgroup/cpu/cpu.stat` (`nr_throttled`) | `/sys/fs/cgroup/cpu.stat` (`nr_throttled`) | Number of throttled periods |
 
-$$\text{Effective CPU Cores} = \frac{\text{cfs\_quota\_us}}{\text{cfs\_period\_us}} = \frac{200,000\,\mu\text{s}}{100,000\,\mu\text{s}} = 2.0\text{ Cores}$$
+
+$$
+\text{Effective CPU Cores} = \frac{\text{cfs\_quota\_us}}{\text{cfs\_period\_us}} = \frac{200,000\,\mu\text{s}}{100,000\,\mu\text{s}} = 2.0\text{ Cores}
+$$
+
 
 ---
 
@@ -424,14 +444,18 @@ Beyond raw physical CPU and memory limits, high-throughput systems frequently co
 
 Any domain resource that can only be safely modified by **one transaction at a time** acts as a hard serializing bottleneck. Under Amdahl's Law and Gunther's Universal Scalability Law (USL), the theoretical maximum throughput ($TPS_{\max}$) of a single shared record is mathematically bounded by its **Lock Hold Time ($T_{\text{hold}}$)**:
 
-$$\text{Max Throughput } (TPS_{\max}) = \frac{1}{\text{Lock Hold Duration } (T_{\text{hold}})}$$
 
-| Critical Section Lock Hold Time ($T_{\text{hold}}$) | Theoretical Max Throughput for Entity | What Happens at $1,000\text{ Concurrent Req/s}$ |
+$$
+\text{Max Throughput } (TPS_{\max}) = \frac{1}{\text{Lock Hold Duration } (T_{\text{hold}})}
+$$
+
+
+| Critical Section Lock Hold Time ($T_{\text{hold}}$) | Theoretical Max Throughput for Entity | What Happens at 1,000 Concurrent Req/s |
 | :--- | :--- | :--- |
-| **$100\text{ ms}$ (Anti-Pattern: Network I/O in SQL Tx)** | **$10\text{ operations / sec}$** | **$990\text{ transactions queued}$** $\rightarrow$ Immediate DB pool exhaustion |
-| **$20\text{ ms}$ (Average: Slow Complex Queries)** | **$50\text{ operations / sec}$** | **$950\text{ transactions queued}$** $\rightarrow$ Lock timeout errors |
-| **$2\text{ ms}$ (Optimized: In-Memory Index Lock)** | **$500\text{ operations / sec}$** | High CPU, but sustainable under short bursts |
-| **$0.2\text{ ms}$ (Redis Atomic `DECRBY` / Partition)** | **$5,000\text{ operations / sec}$** | **100% Non-blocking concurrency** |
+| **100 ms** (Anti-Pattern: Network I/O in SQL Tx) | **10 operations / sec** | **990 transactions queued** $\rightarrow$ Immediate DB pool exhaustion |
+| **20 ms** (Average: Slow Complex Queries) | **50 operations / sec** | **950 transactions queued** $\rightarrow$ Lock timeout errors |
+| **2 ms** (Optimized: In-Memory Index Lock) | **500 operations / sec** | High CPU, but sustainable under short bursts |
+| **0.2 ms** (Redis Atomic `DECRBY` / Partition) | **5,000 operations / sec** | **100% Non-blocking concurrency** |
 
 ---
 
@@ -447,9 +471,9 @@ UPDATE inventory SET stock = stock - 1 WHERE product_id = 42;
 COMMIT;
 ```
 
-Holding the database row lock across an external HTTP call extends $T_{\text{hold}}$ from $2\text{ms}$ to $202\text{ms}$. 
+Holding the database row lock across an external HTTP call extends $T_{\text{hold}}$ from 2ms to 202ms. 
 
-At $202\text{ms}$, this single database row can process at most **$4.95\text{ checkouts / second}$** across your entire global cluster. 
+At 202ms, this single database row can process at most **4.95 checkouts / second** across your entire global cluster. 
 
 Scaling your Go Kubernetes pods from 5 to 500 does not increase throughput by a single transaction; it only opens **500 concurrent connections all queued behind the exact same PostgreSQL row lock**, deadlocking the entire database.
 
@@ -471,11 +495,11 @@ To prevent shared logical resources from destroying system availability, apply t
 
 #### Strategy 1: Shrink the Critical Section to Absolute Zero Network I/O
 - Perform validation, authentication, fraud scoring, and payment authorization **BEFORE** opening the database transaction.
-- Execute row-locking stock deduction in a dedicated, isolated sub-transaction lasting $< 1.5\text{ms}$.
+- Execute row-locking stock deduction in a dedicated, isolated sub-transaction lasting < 1.5ms.
 
 #### Strategy 2: Fast-Fail with `NOWAIT` / `SKIP LOCKED`
 - Never allow worker threads to wait indefinitely in a database lock queue.
-- Use `SELECT ... FOR UPDATE NOWAIT`. If another transaction holds the lock, fail immediately in $< 1\text{ms}$ with a domain conflict error (`409 Conflict`), releasing the connection pool slot instantly.
+- Use `SELECT ... FOR UPDATE NOWAIT`. If another transaction holds the lock, fail immediately in < 1ms with a domain conflict error (`409 Conflict`), releasing the connection pool slot instantly.
 
 #### Strategy 3: Partitioned Inventory / Sub-Bucket Sharding
 - Instead of tracking stock as one row (`stock = 1000`), partition it across 10 independent database rows:
@@ -489,7 +513,7 @@ CREATE TABLE inventory_partitions (
     PRIMARY KEY (sku_id, bucket_id)
 );
 ```
-- A checkout selects a random `bucket_id` ($0–9$) with `FOR UPDATE NOWAIT`. Concurrency increases $10\times$ linearly because 10 concurrent transactions lock 10 distinct physical rows simultaneously.
+- A checkout selects a random `bucket_id` (0–9) with `FOR UPDATE NOWAIT`. Concurrency increases $10\times$ linearly because 10 concurrent transactions lock 10 distinct physical rows simultaneously.
 
 #### Strategy 4: Optimistic Concurrency Control (OCC) with Version Tokens
 - Eliminate row-level locks entirely using conditional updates:
@@ -511,7 +535,7 @@ Before jumping into low-level CPU cache alignment and assembly-level memory layo
 Instead of making PostgreSQL the real-time coordinator of entity mutations:
 1. **In-Process State:** The entity's state (e.g. inventory or balance) is held in standard in-memory Go data structures (`map[uint64]*StandardInventoryItem`) protected by standard Go synchronization primitives (`sync.Mutex` or actor channels).
 2. **Monotonic Event Sequencing:** The process assigns a strictly increasing monotonic `uint64` Event ID ($E_1, E_2, E_3\dots$) to every accepted mutation in memory.
-3. **Asynchronous Batch DB Persistence:** A background flush loop periodically (e.g. every $50\text{ms}$ to $100\text{ms}$) aggregates all in-memory mutations into a single net delta ($\Delta \text{stock}$) and persists it to PostgreSQL alongside the highest synced Event ID watermark (`last_synced_event_id`).
+3. **Asynchronous Batch DB Persistence:** A background flush loop periodically (e.g. every 50ms to 100ms) aggregates all in-memory mutations into a single net delta ($\Delta \text{stock}$) and persists it to PostgreSQL alongside the highest synced Event ID watermark (`last_synced_event_id`).
 4. **Commit Lag Tracking:** The difference between the in-memory head event ($E_{\text{mem}}$) and the database persisted watermark ($E_{\text{db}}$) represents the **Commit Lag** ($\Delta E = E_{\text{mem}} - E_{\text{db}}$).
 
 ```
@@ -640,15 +664,15 @@ func (c *RelaxedCoordinator) CommitLag() uint64 {
 ```
 
 ##### Engineering Trade-Offs of the Relaxed Pattern
-- **When to use:** Workloads needing **$10,000$ to $250,000\text{ ops / sec}$** on a single entity where database row locks are the primary bottleneck.
+- **When to use:** Workloads needing **10,000 to 250,000 ops / sec** on a single entity where database row locks are the primary bottleneck.
 - **Advantages:** Simple to write, review, and maintain; uses standard Go idiom; completely eliminates database row locks; low cognitive burden on the team.
-- **Limits:** When throughput exceeds $250,000\text{ ops / sec}$, `sync.Mutex` lock contention, OS thread preemption, GC write-barriers, and CPU cache-line bouncing across multi-core systems become the next physical wall. This leads directly to **Strategy 7**.
+- **Limits:** When throughput exceeds 250,000 ops / sec, `sync.Mutex` lock contention, OS thread preemption, GC write-barriers, and CPU cache-line bouncing across multi-core systems become the next physical wall. This leads directly to **Strategy 7**.
 
 ---
 
 #### Strategy 7: Hardware-Conscious Evolution: Cache-Line-Aligned State Tracking & Zero-Lock Serialization (Extreme Scale)
 
-When concurrency requirements reach extreme scale ($1,000,000$ to $10,000,000+\text{ ops / sec}$ on single serialized entities, such as in high-frequency trading order matching, exchange ledgers, or global flash sales), the bottleneck moves from database locking to **CPU hardware memory physics**.
+When concurrency requirements reach extreme scale (1,000,000 to 10,000,000+ ops / sec on single serialized entities, such as in high-frequency trading order matching, exchange ledgers, or global flash sales), the bottleneck moves from database locking to **CPU hardware memory physics**.
 
 In this regime, standard mutexes suffer from **mutex lock convoying**, and multi-core architectures collapse due to **CPU cache coherence invalidations (False Sharing)**. Strategy 7 is the hardware-conscious evolution of Strategy 6.
 
@@ -715,7 +739,7 @@ This design synthesizes core principles from high-performance systems engineerin
 
 The implementation requires three components:
 1. **Cache-Line Padded Hot State Structure:** Eliminates False Sharing.
-2. **Hi-Lo Global Event Sequencer:** Leases ID blocks from the DB in a single query to issue monotonic IDs in $< 1\text{ns}$.
+2. **Hi-Lo Global Event Sequencer:** Leases ID blocks from the DB in a single query to issue monotonic IDs in < 1ns.
 3. **Async Batch Sync Loop with Commit Lag Watermarks:** Flushes net state changes to PostgreSQL periodically.
 
 ```go
@@ -858,11 +882,11 @@ func (se *SyncEngine) CommitLag() uint64 {
 
 | Strategy | Critical Section Hold ($T_{\text{hold}}$) | Single-SKU Peak Throughput | Active DB Connections | Engineering Complexity |
 | :--- | :--- | :--- | :--- | :--- |
-| **Traditional SQL Row Lock (`FOR UPDATE`)** | $2.0\text{ ms}$ | **$500\text{ ops / sec}$** | 1 per concurrent client ($990$ queued) | Low (Baseline CRUD) |
-| **Redis Atomic `DECRBY`** | $0.2\text{ ms}$ | **$5,000\text{ ops / sec}$** | $0$ DB conns (Network RTT bounded) | Medium |
-| **Partitioned DB Rows (10 Sub-Rows)** | $2.0\text{ ms}$ | **$5,000\text{ ops / sec}$** | $10$ active DB connections held | Medium |
-| **Strategy 6: In-Memory (Relaxed Single-Process)** | **$< 5.0\ \mu\text{s}$** | **$200,000\text{ ops / sec}$** | **$1\text{ background connection}$** (flushed every 100ms) | **Medium-Low** |
-| **Strategy 7: Cache-Aligned In-Memory (Extreme Scale)** | **$< 20\text{ ns}$ (L1 Hit)** | **$10,000,000+\text{ ops / sec}$** | **$1\text{ background connection}$** (flushed every 50ms) | **Very High** |
+| **Traditional SQL Row Lock (`FOR UPDATE`)** | 2.0 ms | **500 ops / sec** | 1 per concurrent client (990 queued) | Low (Baseline CRUD) |
+| **Redis Atomic `DECRBY`** | 0.2 ms | **5,000 ops / sec** | 0 DB conns (Network RTT bounded) | Medium |
+| **Partitioned DB Rows (10 Sub-Rows)** | 2.0 ms | **5,000 ops / sec** | 10 active DB connections held | Medium |
+| **Strategy 6: In-Memory (Relaxed Single-Process)** | < 5.0 µs | **200,000 ops / sec** | 1 background connection (flushed every 100ms) | **Medium-Low** |
+| **Strategy 7: Cache-Aligned In-Memory (Extreme Scale)** | < 20 ns (L1 Hit) | **10,000,000+ ops / sec** | 1 background connection (flushed every 50ms) | **Very High** |
 
 ##### 5. Application to Mission-Critical Systems (Conditions for Correctness)
 
@@ -870,7 +894,11 @@ This architecture is not limited to gaming or flash sales; it is the gold standa
 
 1. **Durable Ingestion Log (WAL Before ACK):** Before acknowledging a transaction to the caller, the event is appended to an append-only WAL (NVMe ring buffer or distributed Kafka/Raft partition).
 2. **Deterministic State Machine Replay:** On crash or node reboot:
-   $$\text{State}_{\text{RAM}} = \text{Snapshot}_{\text{DB}}(E_{\text{db}}) + \sum_{i=E_{\text{db}}+1}^{E_{\text{mem}}} \Delta \text{Event}_i$$
+
+   $$
+   \text{State}_{\text{RAM}} = \text{Snapshot}_{\text{DB}}(E_{\text{db}}) + \sum_{i=E_{\text{db}}+1}^{E_{\text{mem}}} \Delta \text{Event}_i
+   $$
+
    The engine reads the DB snapshot at $E_{\text{db}}$, replays uncommitted WAL events where $E > E_{\text{db}}$, and rebuilds exact memory state before serving traffic.
 3. **Single-Writer Fencing Leases:** Partition ownership is protected by fencing tokens/leases to ensure split-brain mutations are physically impossible.
 
@@ -882,7 +910,7 @@ This architecture is not limited to gaming or flash sales; it is the gold standa
 | **Testing Burden** | Standard integration tests | Standard concurrency tests | **Extreme** (Deterministic Simulation Testing, Jepsen fault injection, cache-alignment benchmarks in CI) |
 | **Crash Recovery Mechanics** | Automatic (PostgreSQL ACID WAL) | Snapshot + WAL replay | **Custom High-Speed Recovery Engine** |
 | **Team Cognitive Load** | Standard backend engineers | Standard Go developers | **Systems Engineers** (Hardware cache lines, Go runtime memory model) |
-| **Economic Decision Rule** | Default baseline | Adopt when DB locks bottleneck throughput | **Adopt ONLY when $\Delta \text{CoR} \le \Delta \text{ALE}$** (i.e. outage/bottleneck revenue loss exceeds multi-quarter dev costs) |
+| **Economic Decision Rule** | Default baseline | Adopt when DB locks bottleneck throughput | **Adopt ONLY when** $\Delta \text{CoR} \le \Delta \text{ALE}$ (i.e. outage/bottleneck revenue loss exceeds multi-quarter dev costs) |
 
 ---
 
@@ -935,7 +963,7 @@ When an outbound call fails with an HTTP 503 or attempt timeout, **what happens 
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**The Multiplier Effect:** If an operation retries 2 times, its **effective resource hold time** increases from 250ms to $150\text{ms} + 50\text{ms} + 150\text{ms} = 350\text{ms}$. 
+**The Multiplier Effect:** If an operation retries 2 times, its **effective resource hold time** increases from 250ms to 150ms + 50ms + 150ms = 350ms. 
 
 Holding resources $1.4\times$ longer decreases the system's maximum sustainable concurrency by **28.5%**.
 
@@ -988,9 +1016,17 @@ Before writing code, construct a **Resource Budget Matrix** detailing the exact 
 
 To calculate whether an architecture can sustain a target workload mix, use Little's Law and the Resource Multiplication Formula:
 
-$$\text{Active Concurrency}_k = \text{Arrival Rate } (\lambda_k) \times \text{Duration } (W_k)$$
 
-$$\text{Total Resource Demand } (R) = \sum_{k} \left[ \text{Concurrency}_k \times \text{Resource Units}_k \times \left(1 + (\text{Retry Rate}_k \times \text{Retries}_k)\right) \right]$$
+$$
+\text{Active Concurrency}_k = \text{Arrival Rate } (\lambda_k) \times \text{Duration } (W_k)
+$$
+
+
+
+$$
+\text{Total Resource Demand } (R) = \sum_{k} \left[ \text{Concurrency}_k \times \text{Resource Units}_k \times \left(1 + (\text{Retry Rate}_k \times \text{Retries}_k)\right) \right]
+$$
+
 
 ---
 
@@ -1105,7 +1141,11 @@ When you scale stateless compute horizontally, **downstream shared stateful reso
 1. **Connection Pooling Proxy (PgBouncer / AWS RDS Proxy):** Decouple application pod count from database server connection limits.
 2. **Dynamic Pod Pool Sizing:** Set `MaxConns = Database Limit / Max Pods`. If PostgreSQL supports 200 connections and HPA scales to 20 pods, each pod's pool must be strictly capped at:
 
-$$\text{MaxConnsPerPod} = \frac{200}{20} = 10\text{ connections}$$
+
+$$
+\text{MaxConnsPerPod} = \frac{200}{20} = 10\text{ connections}
+$$
+
 
 ---
 
@@ -1142,17 +1182,18 @@ watch -n 1 'cat /sys/fs/cgroup/cpu.stat'
 
 ```bash
 # 1. Count open File Descriptors allocated by the current Go process
-ls -1 /proc/$$/fd | wc -l
+PID=$(pgrep -f app | head -n 1)
+ls -1 /proc/${PID}/fd | wc -l
 
 # 2. Inspect exact target of every open file descriptor
-ls -l /proc/$$/fd
+ls -l /proc/${PID}/fd
 
 # 3. Check OS-level overall file descriptor consumption
 cat /proc/sys/fs/file-nr
 # Output: <Allocated FDs> <Unused Allocated FDs> <Max File Limit>
 
 # 4. Monitor Resident Memory (VmRSS) and OS Thread Count
-cat /proc/$$/status | grep -E 'VmRSS|VmPeak|Threads'
+cat /proc/${PID}/status | grep -E 'VmRSS|VmPeak|Threads'
 ```
 
 ---
@@ -1494,19 +1535,19 @@ Resource limits, capacity budgets, and OpenTelemetry metrics are meaningless wit
 
 1. **Database Connection Headroom:**
    - $\text{DB Headroom} = 1 - \frac{\text{Active Pool Connections}}{\text{Max Pool Size}}$
-   - *Warning Alert:* Headroom $< 25\%$ for $> 60\text{ seconds}$.
-   - *Critical Page:* Headroom $< 10\%$ for $> 15\text{ seconds}$ (Trigger immediate circuit trip).
+   - *Warning Alert:* Headroom < 25% for > 60 seconds.
+   - *Critical Page:* Headroom < 10% for > 15 seconds (Trigger immediate circuit trip).
 2. **File Descriptor Headroom:**
    - $\text{FD Headroom} = 1 - \frac{\text{Current Open FDs}}{\text{ulimit -n Limit}}$
-   - *Warning Alert:* Headroom $< 30\%$.
-   - *Critical Page:* Headroom $< 15\%$.
+   - *Warning Alert:* Headroom < 30%.
+   - *Critical Page:* Headroom < 15%.
 3. **Ephemeral Port Turnover Rate:**
-   - Track active sockets in `TIME_WAIT`. Alert if sockets exceed $50\%$ of available ephemeral range.
+   - Track active sockets in `TIME_WAIT`. Alert if sockets exceed 50% of available ephemeral range.
 4. **Goroutine Expansion Ratio:**
    - Ratio of active goroutines to active in-flight HTTP requests ($\frac{\text{Goroutines}}{\text{Active Ingress Requests}}$). 
-   - A healthy service maintains a ratio between $1.5\text{ and }3.0$. A ratio exceeding $10.0$ indicates goroutine leaks waiting on un-cancelled contexts.
+   - A healthy service maintains a ratio between 1.5 and 3.0; a ratio exceeding 10.0 indicates goroutine leaks waiting on un-cancelled contexts.
 5. **Row-Lock Contention Rate:**
-   - Track PostgreSQL `pg_stat_activity` waiting on `Lock:transactionid` / `Lock:tuple`. Alert if lock queue wait times exceed $20\text{ms}$.
+   - Track PostgreSQL `pg_stat_activity` waiting on `Lock:transactionid` / `Lock:tuple`. Alert if lock queue wait times exceed 20ms.
 
 ---
 
@@ -1633,7 +1674,7 @@ The synchronous boundary ends at `OrderPlaced`. Everything downstream (`Generate
 ### 13.4 Splitting Away from the Main Hot-Path Binary via Event Streaming
 
 Once an event seam is identified:
-1. **The Core Hot-Path Binary:** Executes only the minimal synchronous critical path (Input validation ➔ Payment Capture ➔ SQL Stock Lock ➔ Publish `OrderPlaced` event to Solace/Kafka) and returns `200 OK` in $< 150\text{ms}$.
+1. **The Core Hot-Path Binary:** Executes only the minimal synchronous critical path (Input validation ➔ Payment Capture ➔ SQL Stock Lock ➔ Publish `OrderPlaced` event to Solace/Kafka) and returns `200 OK` in < 150ms.
 2. **The Asynchronous Worker Binary:** Subscribes to `OrderPlaced` over guaranteed messaging, running in dedicated Kubernetes pods provisioned with high memory limits (e.g. 4GB RAM) and scaled independently via KEDA queue-depth metrics.
 
 ---
@@ -1641,7 +1682,7 @@ Once an event seam is identified:
 ### 13.5 When to Consolidate Functionality (The Modular Monolith Sweet Spot)
 
 Do **NOT** split services if the resource profiles are homogeneous:
-- If Operation A and Operation B both require $< 5\text{ms}$ CPU, $< 32\text{KB}$ RAM, and communicate with the same PostgreSQL database, keep them in the **same Go binary** using segregated packages (Modular Monolith).
+- If Operation A and Operation B both require < 5ms CPU, < 32KB RAM, and communicate with the same PostgreSQL database, keep them in the **same Go binary** using segregated packages (Modular Monolith).
 - Splitting homogeneous workloads into separate microservices introduces network serialization overhead, gRPC latency, and dual-write consistency bugs with zero resource isolation benefit.
 
 ---
@@ -1733,14 +1774,14 @@ When active connections reach 250, Envoy immediately rejects incoming requests a
 ### 14.4 Adaptive Rate Limiting & Token Buckets
 
 Implement external distributed rate limiters (e.g. Envoy Global Rate Limit Service backed by Redis):
-- Enforce strict per-second request ceilings per API key or IP address ($100\text{ req/sec}$).
+- Enforce strict per-second request ceilings per API key or IP address (100 req/sec).
 - Reject abusive clients at the edge with `HTTP 429 Too Many Requests` without consuming downstream application CPU cycles.
 
 ---
 
 ### 14.5 Priority Queuing & Shed-Load Ingress Headers
 
-When backend OpenTelemetry metrics report that database connection pool headroom is $< 15\%$:
+When backend OpenTelemetry metrics report that database connection pool headroom is < 15%:
 1. The Ingress Gateway inspects the request priority header: `X-Priority: low` (e.g., browsing recommendations, loyalty point accruals).
 2. The Gateway **drops low-priority requests at the ingress edge**, reserving 100% of remaining pod socket and database pool headroom for high-priority revenue checkouts (`X-Priority: critical`).
 
