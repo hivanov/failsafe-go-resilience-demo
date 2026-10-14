@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>09 - Adaptive Limiter (TCP Vegas) Concurrency Regulation</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>09. Adaptive Limiter: Autonomous Concurrency via TCP Vegas</h2>
+    <p>
+      Unlike static bulkheads, the <strong>Adaptive Limiter</strong> dynamically calculates the latency gradient <code>Gradient = RTT_base / RTT_recent</code>.
+      When downstream dependencies queue, gradient drops below 1.0, and the limiter automatically reduces concurrency <em>before</em> timeouts occur.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="vegasChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const steps = ['t=0s', 't=5s', 't=10s', 't=15s (Downstream Slows)', 't=20s', 't=25s', 't=30s (Shedding)', 't=35s (Recovered)', 't=40s'];
+    const measuredLatency = [20, 20, 22, 65, 110, 140, 115, 25, 20]; // RTT_recent in ms (RTT_base = 20ms)
+    const dynamicConcurrencyLimit = [50, 50, 52, 38, 24, 15, 14, 32, 50]; // Autonomous limit adjustment
+
+    const ctx = document.getElementById('vegasChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: steps,
+        datasets: [
+          {
+            label: 'Recent p90 Latency (ms)',
+            data: measuredLatency,
+            borderColor: '#ef4444',
+            borderWidth: 2,
+            yAxisID: 'yLatency',
+            pointRadius: 4,
+            pointBackgroundColor: '#ef4444'
+          },
+          {
+            label: 'Dynamic Concurrency Limit (Adaptive)',
+            data: dynamicConcurrencyLimit,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            fill: true,
+            borderWidth: 3,
+            yAxisID: 'yLimit',
+            pointRadius: 5,
+            pointBackgroundColor: '#38bdf8'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          yLatency: {
+            position: 'left',
+            ticks: { color: '#ef4444' },
+            grid: { color: '#334155' },
+            title: { display: true, text: 'Latency RTT (ms)', color: '#ef4444' }
+          },
+          yLimit: {
+            position: 'right',
+            ticks: { color: '#38bdf8' },
+            grid: { display: false },
+            title: { display: true, text: 'Allocated Concurrency Slots', color: '#38bdf8' }
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>02 - Tukey Boxplot & Dispersion Analysis</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 20px 0; }
+    .stat-box { background: #334155; padding: 12px; border-radius: 8px; text-align: center; }
+    .stat-val { font-size: 1.3rem; font-weight: bold; color: #38bdf8; }
+    .stat-lbl { font-size: 0.8rem; color: #cbd5e1; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>02. Tukey Five-Number Summary & Outlier Dispersion</h2>
+    <p>
+      Tukey's summary decomposes response times into non-parametric boundaries: <strong>Q1 (25th percentile)</strong>, 
+      <strong>Median (50th percentile)</strong>, and <strong>Q3 (75th percentile)</strong>.
+      Outliers are mathematically defined as any observation exceeding <code>Q3 + (1.5 * IQR)</code>.
+    </p>
+
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-val">12ms</div><div class="stat-lbl">Min Value</div></div>
+      <div class="stat-box"><div class="stat-val">25ms</div><div class="stat-lbl">Q1 (25%)</div></div>
+      <div class="stat-box"><div class="stat-val">45ms</div><div class="stat-lbl">Median (Q2)</div></div>
+      <div class="stat-box"><div class="stat-val">80ms</div><div class="stat-lbl">Q3 (75%)</div></div>
+      <div class="stat-box"><div class="stat-val">55ms</div><div class="stat-lbl">IQR (Q3-Q1)</div></div>
+      <div class="stat-box"><div class="stat-val" style="color: #ef4444;">162.5ms</div><div class="stat-lbl">Outlier Fence</div></div>
+    </div>
+
+    <div class="chart-container">
+      <canvas id="boxplotChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const ctx = document.getElementById('boxplotChart').getContext('2d');
+    
+    // Visualizing the quantile progression and outlier boundaries
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: ['0% (Min)', '25% (Q1)', '50% (Median)', '75% (Q3)', '95% (Safe High)', '99% (Outlier)', '99.9% (Outlier)'],
+        datasets: [
+          {
+            label: 'Production Response Time (ms)',
+            data: [12, 25, 45, 80, 140, 480, 1850],
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 6,
+            pointBackgroundColor: ['#38bdf8', '#38bdf8', '#10b981', '#38bdf8', '#f59e0b', '#ef4444', '#ef4444']
+          },
+          {
+            label: 'Tukey Outlier Threshold (Q3 + 1.5*IQR = 162.5ms)',
+            data: [162.5, 162.5, 162.5, 162.5, 162.5, 162.5, 162.5],
+            borderColor: '#ef4444',
+            borderDash: [6, 6],
+            pointRadius: 0,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } },
+          tooltip: {
+            callbacks: {
+              afterLabel: function(ctx) {
+                if (ctx.dataIndex >= 5) return 'Classified as statistical anomaly / outlier (Tukey 1.5*IQR Rule)';
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Latency (ms)', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

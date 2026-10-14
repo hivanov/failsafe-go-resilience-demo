@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>06 - Retry Storm Resource Multiplier</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>06. The Retry Storm Resource Multiplier</h2>
+    <p>
+      When a downstream service degrades, retrying non-idempotent or slow requests multiplies socket hold time and connection pool demand across the entire cluster: 
+      <code>Resource Demand = Ingress * &Sigma;(HoldTime + Backoff)</code>.
+      Unbounded retries create a self-inflicted amplification attack.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="retryMultiplierChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const failureRates = ['0% (Healthy)', '10%', '20%', '30%', '40%', '50%', '75%', '100% (Outage)'];
+    // Multipliers for MaxAttempts = 1, 2, 3, 5
+    const attempts1 = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+    const attempts2 = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0];
+    const attempts3 = [1.0, 1.21, 1.44, 1.69, 1.96, 2.25, 3.06, 3.0];
+    const attempts5 = [1.0, 1.46, 2.07, 2.85, 3.84, 5.06, 8.20, 5.0];
+
+    const ctx = document.getElementById('retryMultiplierChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: failureRates,
+        datasets: [
+          {
+            label: '1 Attempt (No Retries - Static Demand)',
+            data: attempts1,
+            borderColor: '#10b981',
+            borderWidth: 2,
+            pointRadius: 4
+          },
+          {
+            label: '2 Attempts (Bounded 1 Retry)',
+            data: attempts2,
+            borderColor: '#38bdf8',
+            borderWidth: 2,
+            pointRadius: 4
+          },
+          {
+            label: '3 Attempts (Standard Policy - 2.2x Surge)',
+            data: attempts3,
+            borderColor: '#f59e0b',
+            borderWidth: 3,
+            pointRadius: 5
+          },
+          {
+            label: '5 Attempts (Unbounded / High Retries - 5x Traffic Explosion)',
+            data: attempts5,
+            borderColor: '#ef4444',
+            borderWidth: 3,
+            borderDash: [4, 4],
+            pointRadius: 5
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Downstream Failure Rate (%)', color: '#94a3b8' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Effective Load Multiplier (x Baseline)', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Failsafe-Go & Resilience Engineering - Interactive Visual Gallery</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 32px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { color: #38bdf8; border-bottom: 2px solid #334155; padding-bottom: 12px; }
+    p.subtitle { color: #94a3b8; font-size: 1.1rem; margin-bottom: 32px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 20px; transition: transform 0.2s, box-shadow 0.2s; border: 1px solid #334155; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 28px rgba(0,0,0,0.4); border-color: #38bdf8; }
+    .card h3 { margin-top: 0; color: #f8fafc; font-size: 1.1rem; }
+    .card p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; height: 60px; }
+    .btn { display: inline-block; background: #0284c7; color: #fff; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; margin-top: 12px; }
+    .btn:hover { background: #0369a1; }
+    .tag { display: inline-block; font-size: 0.7rem; font-weight: bold; padding: 2px 8px; border-radius: 4px; background: #334155; color: #38bdf8; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Resilience Engineering & Observability Visual Gallery</h1>
+    <p class="subtitle">Interactive mathematical models, latency distributions, and policy dynamics rendered using Chart.js.</p>
+
+    <div class="grid">
+      <div class="card">
+        <span class="tag">STATISTICS / DISTRIBUTIONS</span>
+        <h3>01. Multimodal Latency & Fallacy of the Mean</h3>
+        <p>Visualizes why arithmetic mean (109.5ms) represents nobody in a bimodal system of cache hits (10ms) vs lock stalls (2,000ms).</p>
+        <a href="01_multimodal_latency_distribution.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">STATISTICS / DISPERSION</span>
+        <h3>02. Tukey Boxplot & Outlier Dispersion</h3>
+        <p>Decomposes response times into Q1, Median, Q3, and the 1.5 * IQR mathematical outlier threshold fence.</p>
+        <a href="02_tukey_boxplot_and_dispersion.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">OBSERVABILITY / SMOOTHING</span>
+        <h3>03. Time Window Smoothing (Raw vs SMA vs EWMA)</h3>
+        <p>Compares raw jitter against lagging Simple Moving Averages and responsive Exponential Weighted Moving Averages (&alpha; = 0.3).</p>
+        <a href="03_time_window_smoothing_ewma_vs_sma.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">MONITORING / SEASONALITY</span>
+        <h3>04. Seasonal Baseline & Relative Anomalies</h3>
+        <p>Demonstrates diurnal baseline comparison (offset 1w) and relative -30% deviation alerting fences.</p>
+        <a href="04_seasonality_and_relative_anomaly_detection.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">ECONOMICS / SLA</span>
+        <h3>05. Asymptotic Cost of Availability</h3>
+        <p>Plots the exponential cost curve Cost &prop; 1 / (1 - SLA) against annual allowable downtime budgets.</p>
+        <a href="05_asymptotic_cost_of_availability.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">RETRIES / CAPACITY</span>
+        <h3>06. Retry Storm Resource Multipliers</h3>
+        <p>Demonstrates how retrying non-idempotent or slow requests multiplies connection pool demand by up to 5x.</p>
+        <a href="06_retry_storm_resource_multiplier.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">QUEUES / CONCURRENCY</span>
+        <h3>07. Little's Law & Queue Bloat</h3>
+        <p>Shows in-flight socket demand surging (L = &lambda;W) from 5 to 200 sockets as downstream latency degrades.</p>
+        <a href="07_littles_law_and_queue_bloat.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">CIRCUIT BREAKERS</span>
+        <h3>08. Sliding Windows (Count vs. Time)</h3>
+        <p>Compares Count-based Ring Buffers against Time-based Epoch Buckets, highlighting the Stale-Failure trap.</p>
+        <a href="08_sliding_windows_count_vs_time.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">ADAPTIVE LIMITERS</span>
+        <h3>09. TCP Vegas Gradient Concurrency Regulation</h3>
+        <p>Simulates autonomous concurrency limit adjustments as downstream latency gradient (RTT_base / RTT_recent) drops.</p>
+        <a href="09_adaptive_limiter_tcp_vegas_gradient.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+
+      <div class="card">
+        <span class="tag">LOAD SHEDDING</span>
+        <h3>10. Google SRE Adaptive Throttling</h3>
+        <p>Plots proportional drop probability P(Drop) vs binary circuit breakers with 90% max rejection recovery clamping.</p>
+        <a href="10_google_sre_adaptive_throttling.html" class="btn">Open Interactive Graph &rarr;</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

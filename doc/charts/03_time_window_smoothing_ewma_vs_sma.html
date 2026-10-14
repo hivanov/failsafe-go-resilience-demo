@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>03 - Time Window Smoothing: Raw vs. SMA vs. EWMA</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+    .legend-box { display: flex; gap: 16px; margin-top: 12px; font-size: 0.85rem; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>03. Time-Series Smoothing: Raw Jitter vs. SMA vs. EWMA</h2>
+    <p>
+      Evaluating raw metrics produces noise and false alarms. 
+      <strong>Simple Moving Average (SMA)</strong> lags behind sudden shifts because it weights old data equally. 
+      <strong>Exponential Weighted Moving Average (EWMA)</strong> with smoothing factor &alpha; = 0.3 reacts rapidly to sudden outages while filtering normal jitter.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="ewmaChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const points = 30;
+    const labels = Array.from({length: points}, (_, i) => `${i*2}s`);
+    
+    // Simulate baseline traffic with a sudden outage jump at step 15
+    const rawData = [];
+    const smaData = [];
+    const ewmaData = [];
+    const alpha = 0.3;
+    let currentEwma = 30;
+
+    for (let i = 0; i < points; i++) {
+      let noise = (Math.random() - 0.5) * 15;
+      let base = (i >= 15) ? 140 : 30; // Outage occurs at step 15
+      let val = Math.max(5, base + noise);
+      rawData.push(val);
+
+      // SMA (5-point window)
+      let start = Math.max(0, i - 4);
+      let sum = 0;
+      for (let j = start; j <= i; j++) sum += rawData[j];
+      smaData.push(sum / (i - start + 1));
+
+      // EWMA
+      currentEwma = (alpha * val) + ((1 - alpha) * currentEwma);
+      ewmaData.push(currentEwma);
+    }
+
+    const ctx = document.getElementById('ewmaChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Raw Metric (High Jitter)',
+            data: rawData,
+            borderColor: '#64748b',
+            borderWidth: 1,
+            pointRadius: 2,
+            borderDash: [3, 3]
+          },
+          {
+            label: 'SMA (5-sample Moving Average - Lags on jump)',
+            data: smaData,
+            borderColor: '#f59e0b',
+            borderWidth: 2,
+            pointRadius: 0
+          },
+          {
+            label: 'EWMA (α = 0.3 - Responsive & Smooth)',
+            data: ewmaData,
+            borderColor: '#38bdf8',
+            borderWidth: 3,
+            pointRadius: 0
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Latency / Rate', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

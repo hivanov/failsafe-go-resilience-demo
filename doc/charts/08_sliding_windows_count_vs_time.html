@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>08 - Sliding Windows: Count-Based vs. Time-Based</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>08. Sliding Windows: Count-Based vs. Time-Based Behavior</h2>
+    <p>
+      <strong>Count-Based Windows</strong> (Ring Buffer of size N) evaluate failure rates over the last N executions, but can retain stale errors during night-time traffic dips.
+      <strong>Time-Based Windows</strong> (10x 1s Epoch Buckets) automatically age out historical failures based on the wall clock, but require minimum execution count guards.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="slidingWindowChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const epochs = ['00:00 (Spike)', '00:02', '00:04', '00:06', '00:08', '00:10 (Recovered)', '00:15 (Night Dip)', '00:20', '00:30'];
+    // Failure Rate % under Count-based (stuck during night) vs Time-based (ages out at 10s)
+    const timeBasedFailureRate = [80, 75, 60, 40, 20, 0, 0, 0, 0];
+    const countBasedFailureRate = [80, 80, 78, 75, 70, 65, 65, 65, 50]; // Stays high because traffic stopped!
+
+    const ctx = document.getElementById('slidingWindowChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: epochs,
+        datasets: [
+          {
+            label: 'Time-Based Sliding Window (10s Epochs - Ages out cleanly)',
+            data: timeBasedFailureRate,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            fill: true,
+            borderWidth: 3,
+            pointRadius: 5,
+            pointBackgroundColor: '#38bdf8'
+          },
+          {
+            label: 'Count-Based Sliding Window (N=100 - Suffers Stale-Failure Trap at Low Load)',
+            data: countBasedFailureRate,
+            borderColor: '#ef4444',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 4,
+            pointBackgroundColor: '#ef4444'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } },
+          tooltip: {
+            callbacks: {
+              afterLabel: function(ctx) {
+                if (ctx.datasetIndex === 1 && ctx.dataIndex >= 6) {
+                  return 'Stale error remains in ring buffer due to lack of new requests!';
+                }
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Calculated Failure Rate (%)', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>01 - Multimodal Latency Distribution & Fallacy of the Mean</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 20px 0; }
+    .stat-box { background: #334155; padding: 12px; border-radius: 8px; text-align: center; }
+    .stat-val { font-size: 1.4rem; font-weight: bold; color: #38bdf8; }
+    .stat-lbl { font-size: 0.8rem; color: #cbd5e1; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-mean { background: #ef4444; color: #fff; }
+    .badge-p99 { background: #eab308; color: #000; }
+    .badge-p50 { background: #10b981; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>01. Multimodal Latency Distribution & Fallacy of the Mean</h2>
+    <p>
+      In distributed architectures, latency is <strong>multimodal</strong>: 95% of requests hit the cache fast-path (10ms), while 5% stall on a database lock (2,000ms).
+      The arithmetic mean of <strong>109.5ms</strong> lies in an empty valley—it describes <em>no user's actual journey</em>.
+    </p>
+
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-val">10ms</div><div class="stat-lbl">Min Latency</div></div>
+      <div class="stat-box"><div class="stat-val">10ms</div><div class="stat-lbl">Median (p50)</div></div>
+      <div class="stat-box"><div class="stat-val">10ms</div><div class="stat-lbl">p90 Latency</div></div>
+      <div class="stat-box"><div class="stat-val">10ms</div><div class="stat-lbl">p95 Latency</div></div>
+      <div class="stat-box"><div class="stat-val" style="color: #ef4444;">109.5ms</div><div class="stat-lbl">Mean (False)</div></div>
+      <div class="stat-box"><div class="stat-val" style="color: #eab308;">2000ms</div><div class="stat-lbl">p99 Latency</div></div>
+      <div class="stat-box"><div class="stat-val">2000ms</div><div class="stat-lbl">Max Latency</div></div>
+    </div>
+
+    <div class="chart-container">
+      <canvas id="latencyChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const labels = [
+      '0-10ms (Cache Hit)', '20ms', '50ms', '100ms (Mean 109.5ms)', 
+      '250ms', '500ms', '1000ms', '1500ms', '2000ms (DB Stall)'
+    ];
+    const frequencies = [95, 0, 0, 0, 0, 0, 0, 0, 5];
+
+    const ctx = document.getElementById('latencyChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Request Count (N = 100)',
+          data: frequencies,
+          backgroundColor: [
+            '#10b981', '#334155', '#334155', '#ef4444', 
+            '#334155', '#334155', '#334155', '#334155', '#eab308'
+          ],
+          borderColor: '#1e293b',
+          borderWidth: 2,
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } },
+          tooltip: {
+            callbacks: {
+              afterLabel: function(ctx) {
+                if (ctx.dataIndex === 0) return 'p50, p90, p95 dwell here (95% of users)';
+                if (ctx.dataIndex === 3) return 'Arithmetic Mean (109.5ms) represents NOBODY';
+                if (ctx.dataIndex === 8) return 'p99 tail stall (5% of users impacted)';
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Requests (N)', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

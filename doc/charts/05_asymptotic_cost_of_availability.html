@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>05 - Asymptotic Cost of Availability</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>05. The Asymptotic Cost Curve of Availability (SLA)</h2>
+    <p>
+      Availability cost follows an exponential curve: <code>Cost &prop; 1 / (1 - SLA)</code>.
+      Moving from 99.0% to 99.9% requires basic policy composition; moving from 99.99% to 99.999% requires 
+      multi-region active-active clusters, zero-lock memory engines, and multi-million dollar investments.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="slaCostChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const slaLabels = ['90.0% (1 Nine)', '95.0% (PoC)', '99.0% (Two Nines)', '99.9% (Three Nines)', '99.99% (Four Nines)', '99.999% (Five Nines)'];
+    const relativeCost = [10, 20, 100, 1000, 10000, 100000]; // Scaled non-linear cost units ($K)
+    const annualDowntimeMinutes = [52560, 26280, 5256, 525.6, 52.56, 5.26];
+
+    const ctx = document.getElementById('slaCostChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: slaLabels,
+        datasets: [
+          {
+            label: 'Relative Organizational Cost ($)',
+            data: relativeCost,
+            borderColor: '#ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            fill: true,
+            borderWidth: 3,
+            yAxisID: 'yCost',
+            pointRadius: 6,
+            pointBackgroundColor: '#ef4444'
+          },
+          {
+            label: 'Allowable Downtime (Minutes / Year)',
+            data: annualDowntimeMinutes,
+            borderColor: '#38bdf8',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            yAxisID: 'yDowntime',
+            pointRadius: 4,
+            pointBackgroundColor: '#38bdf8'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          yCost: {
+            type: 'logarithmic',
+            position: 'left',
+            ticks: { color: '#ef4444' },
+            grid: { color: '#334155' },
+            title: { display: true, text: 'Engineering & Infra Cost (Log Scale $)', color: '#ef4444' }
+          },
+          yDowntime: {
+            type: 'logarithmic',
+            position: 'right',
+            ticks: { color: '#38bdf8' },
+            grid: { display: false },
+            title: { display: true, text: 'Allowable Downtime (Min/Year Log Scale)', color: '#38bdf8' }
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

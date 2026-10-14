@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>04 - Seasonality & Relative Anomaly Detection</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>04. Seasonal Baseline Comparison & Relative Anomaly Detection</h2>
+    <p>
+      Static alerting thresholds fail because traffic follows diurnal cycles (night vs. peak day). 
+      Relative anomaly detection compares current traffic against the exact matching window from last week (<code>offset 1w</code>).
+      An alert fires only when traffic drops by more than <strong>30% relative to the seasonal baseline</strong>.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="seasonChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const hours = ['00:00', '02:00', '04:00', '06:00', '08:00', '10:00', '12:00', '14:00 (Incident)', '16:00', '18:00', '20:00', '22:00'];
+    const baselineLastWeek = [120, 80, 45, 90, 320, 680, 850, 920, 890, 780, 520, 260];
+    // Anomaly occurs at 14:00 (drops from expected 920 to 350 -> >50% drop!)
+    const currentWeekTraffic = [125, 82, 40, 95, 330, 690, 860, 350, 870, 770, 530, 250];
+    const thresholdMinus30 = baselineLastWeek.map(v => v * 0.70);
+
+    const ctx = document.getElementById('seasonChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: hours,
+        datasets: [
+          {
+            label: 'Baseline (Same Day Last Week: offset 1w)',
+            data: baselineLastWeek,
+            borderColor: '#94a3b8',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            pointRadius: 3
+          },
+          {
+            label: '-30% Relative Anomaly Threshold Fence',
+            data: thresholdMinus30,
+            borderColor: '#ef4444',
+            borderWidth: 1,
+            borderDash: [2, 2],
+            pointRadius: 0
+          },
+          {
+            label: 'Current Traffic (RPS)',
+            data: currentWeekTraffic,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            fill: true,
+            borderWidth: 3,
+            pointRadius: 5,
+            pointBackgroundColor: hours.map((_, i) => i === 7 ? '#ef4444' : '#38bdf8')
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } },
+          tooltip: {
+            callbacks: {
+              afterLabel: function(ctx) {
+                if (ctx.dataIndex === 7 && ctx.datasetIndex === 2) {
+                  return 'CRITICAL ALERT: Traffic dropped 62% below seasonal expectation!';
+                }
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Order Velocity (RPS)', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

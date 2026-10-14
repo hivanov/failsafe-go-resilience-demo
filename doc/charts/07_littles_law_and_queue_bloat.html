@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>07 - Little's Law & Queue Bloat Latency Inflation</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }
+    .card { background: #1e293b; border-radius: 12px; padding: 24px; max-width: 900px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    p { color: #94a3b8; line-height: 1.6; }
+    .chart-container { position: relative; height: 380px; width: 100%; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>07. Little's Law ($L = \lambda W$) & The Queue Bloat Trap</h2>
+    <p>
+      At fixed arrival rate &lambda; = 100 RPS, when downstream response time $W$ spikes from 50ms to 2000ms, 
+      concurrent in-flight demand $L$ surges from 5 to <strong>200 concurrent requests</strong>.
+      If large waiting queues are allowed to form, requests age in the queue until caller context deadlines expire before execution begins.
+    </p>
+
+    <div class="chart-container">
+      <canvas id="littlesLawChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const latencies = ['20ms', '50ms (Normal)', '100ms', '200ms', '500ms', '1000ms', '1500ms', '2000ms (Degraded)'];
+    // Inflight demand L for Arrival Rate = 50 RPS, 100 RPS, 200 RPS
+    const demand50RPS = [1, 2.5, 5, 10, 25, 50, 75, 100];
+    const demand100RPS = [2, 5, 10, 20, 50, 100, 150, 200];
+    const demand200RPS = [4, 10, 20, 40, 100, 200, 300, 400];
+
+    const ctx = document.getElementById('littlesLawChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: latencies,
+        datasets: [
+          {
+            label: 'Arrival Rate λ = 50 RPS',
+            data: demand50RPS,
+            borderColor: '#10b981',
+            borderWidth: 2,
+            pointRadius: 4
+          },
+          {
+            label: 'Arrival Rate λ = 100 RPS',
+            data: demand100RPS,
+            borderColor: '#38bdf8',
+            borderWidth: 3,
+            pointRadius: 5
+          },
+          {
+            label: 'Arrival Rate λ = 200 RPS (Heavy Surge)',
+            data: demand200RPS,
+            borderColor: '#ef4444',
+            borderWidth: 3,
+            borderDash: [4, 4],
+            pointRadius: 5
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8' } }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Downstream Response Duration W', color: '#94a3b8' } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { color: '#334155' }, title: { display: true, text: 'Concurrent In-Flight Sockets L (L = λW)', color: '#94a3b8' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
