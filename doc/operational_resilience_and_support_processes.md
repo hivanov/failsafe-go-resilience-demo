@@ -47,7 +47,13 @@ When systems are designed to be **safe-to-fail**, a complete outage of an auxili
 
 Resilience policies buy human operators **time** by shedding load and preventing cascading crashes. However, an operational escalation path is essential for triage and root-cause remediation.
 
-### Operational Staffing Principles:
+### 2.1 The MTTR Physics Barrier & The Uptime Calculator ([uptime.is](https://uptime.is/))
+When setting up on-call support processes, teams must check their mathematical downtime constraints on [https://uptime.is/](https://uptime.is/):
+
+- At **99.9% availability**, monthly downtime budget is **43.8 minutes** $\implies$ A human engineer has a 30-minute MTTR window to respond to a pager, triage, and execute a runbook.
+- At **99.99% availability**, monthly downtime budget is **4 minutes and 23 seconds** $\implies$ **Human-in-the-loop MTTR is physically impossible**. The on-call engineer cannot wake up, log in, and fix an issue in 4 minutes. Real-time incident remediation must be **100% automated** (circuit breakers fast-failing, automated canaries, KEDA autoscaling).
+
+### 2.2 Operational Staffing Principles:
 1. **Designated On-Call Rotations:** Every critical service must have a primary and secondary on-call engineer equipped with paging tools (e.g., PagerDuty, Opsgenie).
 2. **Component Ownership Matrix:** Clearly document which team owns which interface decorator (`PaymentGateway` $\rightarrow$ Payments Team, `InventoryService` $\rightarrow$ Warehouse Logistics Team).
 3. **Explicit Escalation Paths:** Define clear time-bounded escalation rules (e.g., if a payment gateway outage exceeds 15 minutes, escalate to the 3rd-party vendor account representative and VP of Engineering).
