@@ -1,44 +1,48 @@
 # Foundational Statistics, Observability Mathematics & Time-Series Analysis
 
-This document provides a comprehensive mathematical and practical guide to statistical analysis, latency distributions, percentiles, boxplots, moving averages, seasonality modeling, and relative anomaly detection for resilience engineering, QA, and telemetry architectures.
+This document provides an exhaustive, mathematically rigorous, and practical systems-engineering guide to statistical analysis, latency distributions, percentiles, boxplots, moving averages, seasonality modeling, and relative anomaly detection for resilience engineering, QA, and telemetry architectures.
 
-> 📊 **Interactive Visual Gallery**: All statistical distributions and models in this guide are available as standalone interactive Chart.js templates under [`doc/charts/`](./charts/index.html).
+> 📊 **Interactive Visual Gallery**: All statistical distributions, outlier models, and smoothing algorithms in this guide are available as standalone interactive Chart.js templates under [`doc/charts/`](./charts/index.html).
 
 ---
 
 ## Table of Contents
 
 - [1. The Mathematical Failure of Naive Metrics (Min, Average, Max)](#1-the-mathematical-failure-of-naive-metrics-min-average-max)
-  - [1.1 The Min-Time Fallacy: How Fast Errors Masquerade as Peak Performance](#11-the-min-time-fallacy-how-fast-errors-masquerade-as-peak-performance)
+  - [1.1 The Min-Time Fallacy: How Fast Rejections Masquerade as Peak Performance](#11-the-min-time-fallacy-how-fast-rejections-masquerade-as-peak-performance)
   - [1.2 The Average-Time Fallacy: Blended Meaninglessness in Multimodal Systems](#12-the-average-time-fallacy-blended-meaninglessness-in-multimodal-systems)
   - [1.3 The Max-Time Fallacy: Outlier Hysteria vs. Volume Blindness](#13-the-max-time-fallacy-outlier-hysteria-vs-volume-blindness)
-  - [1.4 The Anatomy of Latency Distributions (PDF vs. CDF)](#14-the-anatomy-of-latency-distributions-pdf-vs-cdf)
+  - [1.4 The Anatomy of Latency Distributions: PDF vs. CDF](#14-the-anatomy-of-latency-distributions-pdf-vs-cdf)
+  - [1.5 Geometric and Harmonic Means: Why They Still Fail for Latency SLAs](#15-geometric-and-harmonic-means-why-they-still-fail-for-latency-slas)
 - [2. Percentiles & Quantiles Explained ($p_{50}$ to $p_{99.99}$)](#2-percentiles--quantiles-explained-p_50-to-p_9999)
-  - [2.1 Mathematical Definition of Quantiles](#21-mathematical-definition-of-quantiles)
-  - [2.2 The Meaning of the "Nines" in Production Latency](#22-the-meaning-of-the-nines-in-production-latency)
-  - [2.3 The Fatal Flaw: The Percentile Averaging Fallacy](#23-the-fatal-flaw-the-percentile-averaging-fallacy)
-  - [2.4 Correct Cross-Node Percentile Aggregation (HdrHistogram, t-digest & DDSketch)](#24-correct-cross-node-percentile-aggregation-hdrhistogram-t-digest--ddsketch)
+  - [2.1 Mathematical Definition & Estimation of Quantiles](#21-mathematical-definition--estimation-of-quantiles)
+  - [2.2 The Architectural Anatomy of the "Nines" ($p_{50}$ to $p_{99.99}$)](#22-the-architectural-anatomy-of-the-nines-p_50-to-p_9999)
+  - [2.3 The Fatal Flaw: The Percentile Averaging Fallacy (Jensen's Inequality)](#23-the-fatal-flaw-the-percentile-averaging-fallacy-jensens-inequality)
+  - [2.4 Mergeable Quantile Sketches: t-digest, HdrHistogram & DDSketch](#24-mergeable-quantile-sketches-t-digest-hdrhistogram--ddsketch)
+  - [2.5 Prometheus Histogram Bucket Interpolation (`histogram_quantile`)](#25-prometheus-histogram-bucket-interpolation-histogram_quantile)
 - [3. Boxplots & Dispersion Analysis (Tukey's Summary)](#3-boxplots--dispersion-analysis-tukeys-summary)
-  - [3.1 The Five-Number Summary & The Interquartile Range (IQR)](#31-the-five-number-summary--the-interquartile-range-iqr)
-  - [3.2 Outlier Classification ($1.5 \times \text{IQR}$ Rule)](#32-outlier-classification-15-times-textiqr-rule)
-  - [3.3 ASCII Boxplot Reference & Interpretation](#33-ascii-boxplot-reference--interpretation)
+  - [3.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)](#31-tukeys-five-number-summary--the-interquartile-range-iqr)
+  - [3.2 Standard Deviation ($\sigma$) vs. IQR: The Failure of Gaussian Normality](#32-standard-deviation-sigma-vs-iqr-the-failure-of-gaussian-normality)
+  - [3.3 Mathematical Outlier Classification ($1.5 \times \text{IQR}$ and $3.0 \times \text{IQR}$ Rules)](#33-mathematical-outlier-classification-15-times-textiqr-and-30-times-textiqr-rules)
+  - [3.4 Skewness & Kurtosis in Operational Telemetry](#34-skewness--kurtosis-in-operational-telemetry)
 - [4. Time Windows & Moving Averages: Sizing the "Last X over Y" Equation](#4-time-windows--moving-averages-sizing-the-last-x-over-y-equation)
-  - [4.1 Sizing the "Last X over Y" Parameters for Observability Plots](#41-sizing-the-last-x-over-y-parameters-for-observability-plots)
-  - [4.2 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)](#42-the-3-critical-sizing-pitfalls-aliasing-flapping--inertia)
-  - [4.3 Fixed Windows vs. Sliding Continuous Windows](#43-fixed-windows-vs-sliding-continuous-windows)
-  - [4.4 Simple Moving Average (SMA) vs. Cumulative Moving Average (CMA)](#44-simple-moving-average-sma-vs-cumulative-moving-average-cma)
-  - [4.5 Exponential Weighted Moving Average (EWMA)](#45-exponential-weighted-moving-average-ewma)
+  - [4.1 The "Last X over Y" Dual-Window Framework](#41-the-last-x-over-y-dual-window-framework)
+  - [4.2 Comprehensive Sizing Matrix for Operational Tasks](#42-comprehensive-sizing-matrix-for-operational-tasks)
+  - [4.3 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)](#43-the-3-critical-sizing-pitfalls-aliasing-flapping--inertia)
+  - [4.4 Fixed (Tumbling) Windows vs. Sliding Continuous Windows](#44-fixed-tumbling-windows-vs-sliding-continuous-windows)
+  - [4.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)](#45-simple-moving-average-sma-vs-linear-weighted-moving-average-wma)
+  - [4.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics](#46-exponential-weighted-moving-average-ewma--half-life-physics)
 - [5. Seasonality, Trends & Relative Anomaly Detection](#5-seasonality-trends--relative-anomaly-detection)
-  - [5.1 Time-Series Decomposition: Trend, Seasonality & Residuals](#51-time-series-decomposition-trend-seasonality--residuals)
-  - [5.2 Relative Anomaly Detection: X% Deviation from Previous Y Periods](#52-relative-anomaly-detection-x-deviation-from-previous-y-periods)
-  - [5.3 Seasonally-Aware Prometheus Alerting (The `offset` Pattern)](#53-seasonally-aware-prometheus-alerting-the-offset-pattern)
-  - [5.4 Holt-Winters Triple Exponential Smoothing](#54-holt-winters-triple-exponential-smoothing)
+  - [5.1 Time-Series Decomposition: Additive vs. Multiplicative Models](#51-time-series-decomposition-additive-vs-multiplicative-models)
+  - [5.2 Relative Anomaly Detection: Measuring Percentage Deviations](#52-relative-anomaly-detection-measuring-percentage-deviations)
+  - [5.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern](#53-seasonally-aware-prometheus-alerting-via-the-offset-pattern)
+  - [5.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)](#54-holt-winters-triple-exponential-smoothing-level-trend--seasonality)
 
 ---
 
 ## 1. The Mathematical Failure of Naive Metrics (Min, Average, Max)
 
-In production software operations, engineering teams frequently rely on three naive summary metrics: **Minimum Latency**, **Average Latency**, and **Maximum Latency**. In real-world distributed architectures, each of these metrics fails to represent system health and actively misleads decision-making.
+In production software operations, engineering teams frequently rely on three naive summary metrics: **Minimum Latency**, **Average Latency**, and **Maximum Latency**. In real-world distributed architectures, each of these metrics fails to represent system health and actively misleads operational decision-making.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -63,86 +67,244 @@ In production software operations, engineering teams frequently rely on three na
 ---
 
 ### 1.1 The Min-Time Fallacy: How Fast Errors Masquerade as Peak Performance
-- **The Failure Mode**: The fastest response a web server can possibly generate is an **immediate rejection**.
-- **Real-World Scenario**: If your primary database crashes, your Go HTTP handler immediately returns `500 Internal Error` or `503 Service Unavailable` in $0.2\text{ms}$ without parsing the database or executing business logic. 
-- **The Dashboard Illusion**: The "Minimum Response Time" metric drops from $15\text{ms}$ to $0.2\text{ms}$. A naive monitoring dashboard reports that the service is running at record-breaking speeds, while in reality **$100\%$ of customers are experiencing complete checkout failure**.
-- **Conclusion**: Minimum time measures the cost of rejection, not the speed of successful work.
+- **The Failure Mode**: The fastest response a web server can possibly generate is an **immediate failure or rejection**.
+- **Real-World Production Scenario**: 
+  When an upstream authentication gateway expires, or a backend PostgreSQL cluster runs out of connections and crashes, the Go HTTP handler encounters an immediate connection failure. It returns an HTTP `500 Internal Server Error` or `503 Service Unavailable` in $0.2\text{ms}$ without parsing JSON request payloads, checking caches, or executing business transactions.
+- **The Dashboard Illusion**: 
+  The "Minimum Response Time" metric drops from a healthy $15\text{ms}$ baseline down to $0.2\text{ms}$. A naive monitoring dashboard or automated auto-scaling check reports that the service is running at record-breaking efficiency, while in reality **$100\%$ of user transactions are failing**.
+- **HTTP 304 Not Modified Trap**: 
+  Minimum latency also captures static conditional requests (HTTP 304) where zero compute occurs, skewing performance baselines without reflecting true computational work.
+- **Architectural Conclusion**: Minimum time measures the computational cost of rejection or cache bypassing; it tells you nothing about the health of active application processing.
 
 ---
 
 ### 1.2 The Average-Time Fallacy: Blended Meaninglessness in Multimodal Systems
-- **The Failure Mode**: Response times in distributed systems do not follow a symmetric bell curve; they are **multimodal** (having multiple distinct peaks).
-- **Real-World Scenario**: An e-commerce catalog API handles 100 requests:
+- **The Failure Mode**: Response times in distributed systems do not follow a Gaussian (Normal / Bell-curve) distribution; they are **multimodal** (exhibiting multiple distinct distribution peaks).
+- **Real-World Production Scenario**: 
+  An e-commerce catalog API handles 100 requests:
   * 95 requests hit a Redis cache and return in $10\text{ms}$.
-  * 5 requests miss the cache, block on a PostgreSQL row lock, and take $2,000\text{ms}$ ($2\text{s}$).
-  * $$\text{Average} = \frac{(95 \times 10) + (5 \times 2000)}{100} = \frac{950 + 10000}{100} = \mathbf{109.5\text{ms}}$$
-- **The Dashboard Illusion**: The dashboard reports an average latency of $109.5\text{ms}$.
+  * 5 requests miss the cache, block on a PostgreSQL row lock (`SELECT ... FOR UPDATE`), and take $2,000\text{ms}$ ($2\text{s}$).
+  * $$\text{Arithmetic Mean } (\mu) = \frac{(95 \times 10) + (5 \times 2000)}{100} = \frac{950 + 10000}{100} = \mathbf{109.5\text{ms}}$$
+- **The Dashboard Illusion**: 
+  The dashboard reports an average latency of $109.5\text{ms}$.
   * Did any user wait $109.5\text{ms}$? **No.**
   * $95\%$ of users had a fast $10\text{ms}$ experience.
-  * $5\%$ of users (1 out of every 20 customers) suffered an intolerable $2\text{s}$ stall and abandoned their carts.
-- **Conclusion**: The average blends success and disaster into a single fictional number that represents nobody's actual experience.
+  * $5\%$ of users (1 out of every 20 customers) suffered an intolerable $2\text{s}$ stall and abandoned their shopping carts.
+- **The Asymmetry of User Frustration**: 
+  A fast response creates mild user satisfaction, but an extreme delay causes immediate user departure. An arithmetic mean treats 10 users waiting $100\text{ms}$ as mathematically equivalent to 1 user waiting $1,000\text{ms}$, but in human economics, the 1-second stall permanently loses a customer.
+- **Architectural Conclusion**: The arithmetic average blends success and disaster into a single fictional number that represents nobody's actual experience.
+
+```
+REQUEST COUNT (PDF)
+  │  [ Peak 1: Fast Cache Path (10ms) ]
+  │   ██████████████████
+  │   ██████████████████ (95% of users)
+  │   ██████████████████
+  │   ██████████████████
+  │                                    [ Peak 2: DB Row Lock Stall (2000ms) ]
+  │                                     █ (5% of users - SLA Violated!)
+──┴─────────────────────────────────────█──────────────────────────────> LATENCY
+     0ms                                2000ms
+               ▲
+               └── Arithmetic Mean (109.5ms) represents an EMPTY VALLEY where zero requests exist!
+```
 
 ---
 
 ### 1.3 The Max-Time Fallacy: Outlier Hysteria vs. Volume Blindness
 - **The Failure Mode**: Maximum latency is hypersensitive to a single non-reproducible outlier while remaining completely blind to the blast radius (number of affected users).
-- **Real-World Scenario A (False Alarm)**: 1,000,000 mobile users complete checkouts in $50\text{ms}$. One user enters a subterranean parking garage with cell reception dropping packets, causing a TCP socket read timeout of $60\text{ seconds}$. 
-  * The Maximum Latency spikes to $60\text{s}$. If an on-call engineer is paged on "Max Latency > 2s", they are woken up at 03:00 AM for a single user's physical antenna drop.
-- **Real-World Scenario B (Volume Blindness)**: During a minor database lock contention, 5,000 checkout requests are delayed to $3.9\text{ seconds}$ (violating the $1\text{s}$ SLA). One request takes $4.0\text{ seconds}$.
-  * The Max Latency shows $4.0\text{s}$. The metric is incapable of telling leadership whether **1 single customer** was slow or **5,000 customers** were simultaneously impacted.
-- **Conclusion**: Max latency measures noise without context; it must always be replaced by high-order percentiles ($p_{99}, p_{99.9}$) correlated with volume counts.
+- **Real-World Scenario A (Outlier Hysteria / False Alarm)**: 
+  A high-scale API processes 1,000,000 requests in $50\text{ms}$. One user enters a subway tunnel on mobile cell reception with high packet loss, causing a TCP socket read timeout of $60\text{ seconds}$. 
+  * The Maximum Latency spikes to $60\text{s}$. If an on-call engineer is paged on "Max Latency > 2s", they are woken up at 03:00 AM for a single user's physical radio antenna disconnect.
+- **Real-World Scenario B (Volume Blindness / Masked Outage)**: 
+  During a database lock escalation incident, 5,000 checkout requests are delayed to $3.9\text{ seconds}$ (violating the $1\text{s}$ SLA). One request takes $4.0\text{ seconds}$.
+  * The Max Latency shows $4.0\text{s}$. The metric is incapable of telling engineering leadership whether **1 single customer** was slow or **5,000 customers** were simultaneously failing.
+- **Architectural Conclusion**: Max latency measures noise without context; it must always be replaced by high-order percentiles ($p_{99}, p_{99.9}$) correlated with volume counters.
 
 ---
 
-### 1.4 The Anatomy of Latency Distributions (PDF vs. CDF)
-- **Probability Density Function (PDF)**: Shows the relative frequency of individual latency buckets (the shape of the histogram).
-- **Cumulative Distribution Function (CDF)**: Shows the probability that a request completes in $\le X\text{ milliseconds}$. The CDF is monotonic ($0.0 \dots 1.0$), making it the most accurate representation for SLA verification.
+### 1.4 The Anatomy of Latency Distributions: PDF vs. CDF
+
+In software observability, response times are represented by two mathematical functions:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       PDF vs. CDF IN LATENCY MODELING                       │
+├──────────────────────────────────────┬──────────────────────────────────────┤
+│ 1. Probability Density Function (PDF)│ 2. Cumulative Distribution Function  │
+│    (Histogram / Frequency Curve)     │    (Monotonic SLA Compliance Curve)  │
+├──────────────────────────────────────┼──────────────────────────────────────┤
+│ Shows the relative frequency of      │ Shows the exact probability that a   │
+│ individual response time buckets.    │ request finishes in <= X ms.         │
+│ Identifies multimodal clusters.      │ Range: Strictly 0.0 (0%) to 1.0 (100)│
+└──────────────────────────────────────┴──────────────────────────────────────┘
+```
+
+#### 1. Probability Density Function (PDF):
+$$f(x) = P(X = x)$$
+The PDF visualizes where execution time clusters. A service with an in-memory cache, an edge CDN, and a database will exhibit a **trimodal PDF** with distinct peaks at $1\text{ms}$ (RAM), $25\text{ms}$ (CDN), and $150\text{ms}$ (DB).
+
+#### 2. Cumulative Distribution Function (CDF):
+$$F(x) = P(X \le x) = \int_{0}^{x} f(u) \, du$$
+The CDF is strictly monotonically increasing ($0 \le F(x) \le 1$). 
+- To verify an SLA contract (*"99% of requests must complete in $\le 500\text{ms}$"*), evaluate the CDF at $x = 500\text{ms}$. If $F(500\text{ms}) \ge 0.99$, the SLA is satisfied.
+
+---
+
+### 1.5 Geometric and Harmonic Means: Why They Still Fail for Latency SLAs
+
+To overcome the arithmetic mean's distortion by large outliers, statisticians sometimes propose alternative Pythagorean means:
+
+1. **Geometric Mean**:
+   $$G = \left(\prod_{i=1}^{N} x_i\right)^{\frac{1}{N}} = \exp\left(\frac{1}{N} \sum_{i=1}^{N} \ln x_i\right)$$
+   *Use Case*: Useful for normalizing benchmarks across different machines (e.g., SPEC CPU benchmarks) where relative ratios matter.
+   *Failure in Latency*: Severely dampens extreme tails (a $2,000\text{ms}$ stall is log-compressed to $\ln(2000) \approx 7.6$), masking severe user latency spikes.
+
+2. **Harmonic Mean**:
+   $$H = \frac{N}{\sum_{i=1}^{N} \frac{1}{x_i}}$$
+   *Use Case*: Useful for averaging rates (e.g. Transactions Per Second / throughput across nodes).
+   *Failure in Latency*: Heavily biased toward the smallest numbers. A single fast failure ($0.2\text{ms}$) pulls the entire harmonic mean down to near-zero ($\frac{1}{0.2} = 5$), making an outage look like high-speed performance.
+
+**Conclusion**: No single parametric scalar mean (Arithmetic, Geometric, or Harmonic) can characterize distributed system latency. Only **non-parametric quantiles (percentiles)** provide honest, actionable visibility.
 
 ---
 
 ## 2. Percentiles & Quantiles Explained ($p_{50}$ to $p_{99.99}$)
 
-### 2.1 Mathematical Definition of Quantiles
-The $q$-th quantile (or $p$-th percentile where $p = 100q$) of a sorted dataset of $N$ values is the value $V$ such that at least $p\%$ of the observations are less than or equal to $V$:
+### 2.1 Mathematical Definition & Estimation of Quantiles
 
+The $q$-th quantile (or $p$-th percentile where $p = 100q$ and $0 < q < 1$) of an ordered set of $N$ latency measurements $x_{(1)} \le x_{(2)} \le \dots \le x_{(N)}$ is the value below which a proportion $q$ of the data falls.
+
+#### 1. Nearest-Rank Method:
 $$\text{Rank}(p) = \left\lceil \frac{p}{100} \times N \right\rceil$$
+$$p\text{-th Percentile} = x_{(\text{Rank})}$$
 
-### 2.2 The Meaning of the "Nines" in Production Latency
+For $N = 1,000$ requests:
+- $p_{50}$ (Median) is the $500$-th sorted value.
+- $p_{95}$ is the $950$-th sorted value.
+- $p_{99}$ is the $990$-th sorted value.
+- $p_{99.9}$ is the $999$-th sorted value.
+
+#### 2. Linear Interpolation Method (Continuous Quantiles):
+When computing percentiles over continuous samples, compute the real-valued index $h = (N - 1)q + 1$. 
+Let $i = \lfloor h \rfloor$ and $r = h - i$:
+$$Q(q) = (1 - r)x_{(i)} + r x_{(i+1)}$$
+
+---
+
+### 2.2 The Architectural Anatomy of the "Nines" ($p_{50}$ to $p_{99.99}$)
+
+In production systems, each percentile band maps to a specific physical layer of the infrastructure:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          PERCENTILE SPECTRUM & MEANING                      │
-├────────────┬──────────────────┬─────────────────────────────────────────────┤
-│ PERCENTILE │ STATISTICAL NAME │ PRODUCTION MEANING                          │
-├────────────┼──────────────────┼─────────────────────────────────────────────┤
-│ $p_{50}$   │ Median           │ Typical user experience (half faster/slower)│
-│ $p_{90}$   │ 90th Percentile  │ Slowest 1 in 10 requests                    │
-│ $p_{95}$   │ 95th Percentile  │ Degradation threshold; ideal for Hedging    │
-│ $p_{99}$   │ 99th Percentile  │ Tail latency; slowest 1 in 100 requests     │
-│ $p_{99.9}$ │ 3 Nines Latency  │ Severe tail; GC pauses, disk lock stalls    │
-│ $p_{99.99}$│ 4 Nines Latency  │ Critical outlier; TCP SYN timeout drops     │
-└────────────┴──────────────────┴─────────────────────────────────────────────┘
+│                      WHAT EACH PERCENTILE BAND MEASURES                     │
+├────────────┬─────────────────────────────┬──────────────────────────────────┤
+│ PERCENTILE │ PHYSICAL / ARCHITECTURAL    │ WHAT SYSTEM EVENTS OCCUR HERE    │
+│            │ DOMAIN                      │                                  │
+├────────────┼─────────────────────────────┼──────────────────────────────────┤
+│ $p_{50}$   │ The Core Fast Path          │ Cache hits, optimized SQL queries│
+│ (Median)   │                             │ with active connection reuse.    │
+├────────────┼─────────────────────────────┼──────────────────────────┤
+│ $p_{90}$   │ Minor Resource Competition  │ CPU scheduling delays, minor OS  │
+│            │                             │ thread preemption, TLS handshakes│
+├────────────┼─────────────────────────────┼──────────────────────────┤
+│ $p_{95}$   │ Degradation Threshold       │ Database disk reads (cache miss),│
+│            │ (The Hedging Boundary)      │ single network packet re-orders. │
+├────────────┼─────────────────────────────┼──────────────────────────┤
+│ $p_{99}$   │ Severe Contention Tail      │ Lock waits, retries with backoff,│
+│            │                             │ Linux CFS CPU quota throttling.  │
+├────────────┼─────────────────────────────┼──────────────────────────┤
+│ $p_{99.9}$ │ Infrastructure Glitches     │ Go Stop-The-World GC pauses,     │
+│ (3 Nines)  │                             │ VM noisy-neighbor CPU steals.    │
+├────────────┼─────────────────────────────┼──────────────────────────┤
+│ $p_{99.99}$│ Kernel / Physical Network   │ TCP SYN retransmit drops (1s/3s),│
+│ (4 Nines)  │ Dropouts                    │ Pod rescheduling / OOM restarts. │
+└────────────┴─────────────────────────────┴──────────────────────────┘
 ```
 
-### 2.3 The Fatal Flaw: The Percentile Averaging Fallacy
-A pervasive mistake in SRE and DevOps dashboards is computing percentiles per pod and then taking the arithmetic mean across the cluster:
+---
+
+### 2.3 The Fatal Flaw: The Percentile Averaging Fallacy (Jensen's Inequality)
+
+A widespread, catastrophic error in SRE and DevOps dashboards is computing $p_{99}$ per pod and then taking the arithmetic average of those $p_{99}$ values across the cluster:
 
 $$\text{FATAL ERROR: } \text{Cluster } p_{99} \ne \frac{p_{99}(\text{Pod } 1) + p_{99}(\text{Pod } 2) + \dots + p_{99}(\text{Pod } K)}{K}$$
 
-**Why is this mathematically invalid?**
-- Percentiles are rank-order statistics, not linear scalar values.
-- If Pod 1 processes 10,000 requests with $p_{99} = 50\text{ms}$, and Pod 2 processes 100 requests with $p_{99} = 2,000\text{ms}$, averaging them yields $\frac{50 + 2000}{2} = 1,025\text{ms}$. In reality, only 1 request out of 10,100 experienced $2,000\text{ms}$, so the true cluster $p_{99}$ is $\approx 50\text{ms}$.
+#### Mathematical Proof of the Fallacy:
+Percentiles are **rank-order non-linear operators**, not linear summations. By Jensen's Inequality, for any non-linear transformation $g(X)$:
+$$E[g(X)] \ne g(E[X])$$
 
-### 2.4 Correct Cross-Node Percentile Aggregation (HdrHistogram, t-digest & DDSketch)
-To calculate true cluster-wide percentiles without centralizing billions of raw raw numbers:
-1. **Prometheus Histograms**: Bucketize observations into exponential boundary buckets (`le="0.05"`, `le="0.1"`, `le="0.25"`), then calculate percentiles across pods using `histogram_quantile(0.99, sum(rate(http_duration_bucket[5m])) by (le))`.
-2. **t-digest / DDSketch**: Mergeable probabilistic data structures that compress floating-point distributions with guaranteed relative error bounds ($\epsilon \le 1\%$).
+#### Real-World Production Example:
+Consider a cluster of 2 Kubernetes pods:
+- **Pod 1 (High Traffic, Healthy)**: Processes $10,000\text{ requests}$ with $p_{99} = \mathbf{50\text{ms}}$ (only 100 requests were slower than 50ms).
+- **Pod 2 (Low Traffic / Startup, Degraded)**: Processes $100\text{ requests}$ with $p_{99} = \mathbf{2,000\text{ms}}$ (only 1 request took 2000ms).
+
+$$\text{Naive Arithmetic Average of } p_{99} = \frac{50\text{ms} + 2000\text{ms}}{2} = \mathbf{1,025\text{ms}}$$
+
+**What is the TRUE Cluster $p_{99}$?**
+- Total cluster requests = $10,000 + 100 = 10,100\text{ requests}$.
+- The 99th percentile represents the $99\%$ mark, which leaves the slowest $1\%$ of total traffic ($101\text{ requests}$).
+- Pod 1 had 100 slow requests, and Pod 2 had 1 slow request ($100 + 1 = 101\text{ slow requests}$).
+- The true 99th percentile across all $10,100$ requests is **$\approx 50\text{ms}$**!
+- The naive average reported $1,025\text{ms}$ ($20\times$ higher than reality), triggering false panic. Conversely, if Pod 1 had been slow and Pod 2 fast, the average would have completely masked a major outage.
+
+---
+
+### 2.4 Mergeable Quantile Sketches: t-digest, HdrHistogram & DDSketch
+
+To compute accurate cluster-wide percentiles across hundreds of nodes without centralizing billions of raw integers, distributed telemetry engines use **mergeable probabilistic data sketches**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 MERGEABLE QUANTILE DATA SKETCH COMPARISON                   │
+├────────────────────┬─────────────────────────────┬──────────────────────────┤
+│ SKETCH ALGORITHM   │ CORE MECHANISM              │ BEST OPERATIONAL USE     │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 1. t-digest        │ Dynamic 1D centroid         │ Extreme tail accuracy    │
+│    (Ted Dunning)   │ clustering with non-linear  │ ($p_{99.9}, p_{99.99}$)  │
+│                    │ scale function $\delta(q)$. │ in OpenSearch/Elastic.   │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 2. HdrHistogram    │ Logarithmic integer array   │ Sub-microsecond recording│
+│    (Gil Tene)      │ with fixed precision and    │ in low-latency Go/Java   │
+│                    │ zero runtime allocations.   │ services; fixes CO.      │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 3. DDSketch        │ Logarithmic bucket sizing   │ Guaranteed relative error│
+│    (Datadog)       │ with strict relative error  │ bounds ($\epsilon \le 1\%$) in      │
+│                    │ bound $\epsilon$.           │ streaming metrics.       │
+└────────────────────┴─────────────────────────────┴──────────────────────────┘
+```
+
+#### 1. t-digest Mechanics:
+- Clusters data into a sequence of $K$ centroids $(C_i = (\mu_i, w_i))$.
+- Uses a non-linear scale function $\delta(q) = \frac{\arcsin(2q - 1)}{\pi}$ that forces centroids near $q = 0$ (min) and $q = 1$ (tail) to be extremely small (high resolution), while allowing larger centroids in the median ($q = 0.5$).
+- **Mergeability**: Two t-digests from different Kubernetes pods can be merged in $O(K)$ time simply by concatenating and sorting centroids.
+
+#### 2. HdrHistogram & Coordinated Omission:
+- Covers dynamic ranges from $1\mu\text{s}$ to $1\text{ hour}$ with configurable significant value digits (e.g., 3 digits).
+- **Coordinated Omission Correction**: If a client sends requests every $10\text{ms}$, but a server stall freezes the connection for $1,000\text{ms}$, standard benchmarks record only **1 slow request** (omitting the 99 requests that were prevented from sending). HdrHistogram automatically injects the missing coordinated omissions to reflect true user experience.
+
+---
+
+### 2.5 Prometheus Histogram Bucket Interpolation (`histogram_quantile`)
+
+Prometheus calculates percentiles on the server side using cumulative bucket counters (`_bucket{le="..."}`):
+
+$$\text{PromQL: } \text{histogram\_quantile}\left(0.99, \sum_{i} \text{rate}(\text{http\_request\_duration\_seconds\_bucket}[5\text{m}]) \text{ by } (\text{le})\right)$$
+
+#### How Prometheus Computes Percentiles Without Raw Data:
+1. Sums the counter rates for each exponential bucket across all selected pods.
+2. Identifies the specific bucket $[le_{lower}, le_{upper}]$ in which the target quantile rank falls.
+3. Performs **linear interpolation** within that bucket:
+   $$Q(q) = le_{lower} + (le_{upper} - le_{lower}) \times \frac{q \cdot N_{total} - \text{Count}_{lower}}{\text{Count}_{upper} - \text{Count}_{lower}}$$
+
+**Crucial Sizing Rule**: Choose histogram bucket boundaries (`le`) that tightly bracket your SLA threshold (e.g., `le="0.1", le="0.25", le="0.5", le="0.8", le="1.0"` for an 800ms SLA). If all tail requests land in the `+Inf` bucket, `histogram_quantile` returns mathematically meaningless interpolations.
 
 ---
 
 ## 3. Boxplots & Dispersion Analysis (Tukey's Summary)
 
-A Boxplot (Box-and-Whisker Plot) provides a standardized 5-number visual summary of a latency distribution.
+A Boxplot (Box-and-Whisker Plot), formulated by mathematician John Tukey in 1977, provides a standardized 5-number visual summary of a latency distribution.
 
 ```
                   Q1 - 1.5*IQR          Q1      Median (Q2)     Q3          Q3 + 1.5*IQR
@@ -156,26 +318,71 @@ A Boxplot (Box-and-Whisker Plot) provides a standardized 5-number visual summary
                         │                       (Q3 - Q1)                         │
 ```
 
-### 3.1 The Five-Number Summary & The Interquartile Range (IQR)
-1. **Minimum ($Min$)**: The smallest observation within the non-outlier range.
-2. **First Quartile ($Q_1$ / 25th Percentile)**: $25\%$ of observations fall below this value.
-3. **Median ($Q_2$ / 50th Percentile)**: The midpoint of the distribution.
-4. **Third Quartile ($Q_3$ / 75th Percentile)**: $75\%$ of observations fall below this value.
-5. **Maximum ($Max$)**: The largest observation within the non-outlier range.
+---
 
-The **Interquartile Range (IQR)** measures statistical dispersion:
+### 3.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)
+
+1. **Minimum ($Min$)**: The smallest data point within the lower fence ($Min \ge Q_1 - 1.5 \times \text{IQR}$).
+2. **First Quartile ($Q_1$ / 25th Percentile)**: The value below which $25\%$ of observations lie.
+3. **Median ($Q_2$ / 50th Percentile)**: The geometric midpoint of the distribution.
+4. **Third Quartile ($Q_3$ / 75th Percentile)**: The value below which $75\%$ of observations lie.
+5. **Maximum ($Max$)**: The largest data point within the upper fence ($Max \le Q_3 + 1.5 \times \text{IQR}$).
+
+The **Interquartile Range (IQR)** represents the middle $50\%$ of the entire dataset:
 $$\text{IQR} = Q_3 - Q_1$$
 
-### 3.2 Outlier Classification ($1.5 \times \text{IQR}$ Rule)
-John Tukey established the standard mathematical boundary for detecting anomalous outliers:
-- **Mild High Outlier**: $\text{Value} > Q_3 + (1.5 \times \text{IQR})$
-- **Extreme High Outlier**: $\text{Value} > Q_3 + (3.0 \times \text{IQR})$
+---
+
+### 3.2 Standard Deviation ($\sigma$) vs. IQR: The Failure of Gaussian Normality
+
+In classical introductory statistics, dispersion is measured via Sample Variance ($s^2$) and Standard Deviation ($\sigma$):
+$$\sigma = \sqrt{\frac{1}{N-1} \sum_{i=1}^{N} (x_i - \mu)^2}$$
+
+#### Why Standard Deviation Fails for Service Latency:
+- The standard deviation formula relies on squaring differences from the mean $(x_i - \mu)^2$.
+- In a Gaussian distribution, the Empirical 68-95-99.7 Rule holds ($\mu \pm 2\sigma$ covers $95.4\%$, $\mu \pm 3\sigma$ covers $99.7\%$).
+- **In Latency Data**: Because latency distributions have heavy right-side tails, squaring a $5\text{-second}$ timeout inflates $\sigma$ exponentially. Furthermore, applying $\mu - 2\sigma$ often yields a **negative number of milliseconds** (e.g. $-140\text{ms}$), which is physically impossible.
+- **Resilience Rule**: Always use **IQR and Percentiles** (Non-Parametric statistics) rather than Standard Deviation (Parametric statistics) to measure latency dispersion.
+
+---
+
+### 3.3 Mathematical Outlier Classification ($1.5 \times \text{IQR}$ and $3.0 \times \text{IQR}$ Rules)
+
+John Tukey defined rigorous mathematical boundaries ("fences") to classify anomalous observations:
+
+$$\text{Lower Inner Fence} = Q_1 - (1.5 \times \text{IQR})$$
+$$\text{Upper Inner Fence} = Q_3 + (1.5 \times \text{IQR})$$
+$$\text{Lower Outer Fence} = Q_1 - (3.0 \times \text{IQR})$$
+$$\text{Upper Outer Fence} = Q_3 + (3.0 \times \text{IQR})$$
+
+- **Mild High Outlier**: Any latency observation where:
+  $$Q_3 + (1.5 \times \text{IQR}) < \text{Latency} \le Q_3 + (3.0 \times \text{IQR})$$
+- **Extreme High Outlier**: Any latency observation where:
+  $$\text{Latency} > Q_3 + (3.0 \times \text{IQR})$$
+
+*Operational Application*: When building automated load-test assertions, flag any test run where the ratio of Extreme High Outliers exceeds $0.1\%$ of total traffic.
+
+---
+
+### 3.4 Skewness & Kurtosis in Operational Telemetry
+
+Two higher-order statistical moments provide immediate diagnosis of system behavior:
+
+#### 1. Skewness ($\gamma_1$ / Asymmetry):
+$$\gamma_1 = \frac{\frac{1}{N} \sum_{i=1}^{N} (x_i - \mu)^3}{\sigma^3}$$
+- $\gamma_1 = 0$: Perfectly symmetric distribution.
+- $\gamma_1 > 0$: **Positive (Right) Skew**. Normal for healthy software systems (vast majority of traffic fast, long tail of slow queries).
+- Sudden spike in $\gamma_1$: Indicates tail latency degradation while the median remains unchanged.
+
+#### 2. Kurtosis ($\gamma_2$ / Heavy-Tailedness):
+$$\gamma_2 = \frac{\frac{1}{N} \sum_{i=1}^{N} (x_i - \mu)^4}{\sigma^4} - 3$$
+- $\gamma_2 > 0$ (**Leptokurtic**): Heavy-tailed distribution. Outliers are frequent and extreme (typical during database lock escalation or retry storms).
 
 ---
 
 ## 4. Time Windows & Moving Averages: Sizing the "Last X over Y" Equation
 
-When configuring statistical dashboards, Prometheus queries, and alerting rules, engineering teams must evaluate metrics across two distinct time dimensions:
+When configuring dashboards, Prometheus queries, and alerting rules, engineering teams must evaluate metrics across two distinct time dimensions:
 $$\text{Query Template: } \text{"Metric over the last } \mathbf{X} \text{ (duration) bucketed / compared over } \mathbf{Y} \text{ (resolution/baseline)}"$$
 
 ```
@@ -198,23 +405,33 @@ $$\text{Query Template: } \text{"Metric over the last } \mathbf{X} \text{ (durat
 
 ---
 
-### 4.1 Sizing the "Last X over Y" Parameters for Observability Plots
+### 4.1 The "Last X over Y" Dual-Window Framework
+
+1. **$X$ (Evaluation Horizon / Lookback Duration)**:
+   Controls how much history is included in the statistical calculation (e.g. `rate(http_requests_total[5m])`).
+2. **$Y$ (Step Resolution / Sampling Epoch)**:
+   Controls how frequently data points are rendered on the chart or evaluated by the alert engine (e.g. step = `15s`).
+
+---
+
+### 4.2 Comprehensive Sizing Matrix for Operational Tasks
 
 | Operational Task | Optimal $X$ (Evaluation Window) | Optimal $Y$ (Step / Resolution) | Rationale & Practical Example |
 | :--- | :--- | :--- | :--- |
-| **Real-Time Incident Alerting** | $\mathbf{X = 1\text{m}–5\text{m}}$ | $\mathbf{Y = 15\text{s}}$ | Catches production outages within 60s without waking on-call engineers for a 2-second blip. |
+| **Real-Time Incident Alerting** | $\mathbf{X = 1\text{m}–5\text{m}}$ | $\mathbf{Y = 15\text{s}}$ | Catches production outages within 60s without waking on-call engineers for a 2-second transient spike. |
 | **Micro-Jitter & GC Stalls** | $\mathbf{X = 30\text{s}–60\text{s}}$ | $\mathbf{Y = 100\text{ms}–500\text{ms}}$ | Resolves individual 200ms Stop-The-World GC pauses or lock contention spikes. |
-| **Deployment Canary Verification**| $\mathbf{X = 15\text{m}–30\text{m}}$ | $\mathbf{Y = 1\text{m}}$ | Sufficient statistical sample to compare Canary vs Baseline error rate. |
+| **Deployment Canary Verification**| $\mathbf{X = 15\text{m}–30\text{m}}$ | $\mathbf{Y = 1\text{m}}$ | Provides sufficient statistical sample size to compare Canary vs Baseline error rate. |
 | **Seasonal Anomaly Detection** | $\mathbf{X = 10\text{m}}$ | $\mathbf{Y = 7\text{ days offset}}$ | Evaluates current 10m order rate against the exact matching 10m window from last week. |
 | **Capacity & Trend Planning** | $\mathbf{X = 30\text{d}–90\text{d}}$ | $\mathbf{Y = 1\text{ hour}–1\text{ day}}$ | Filters out intra-day noise to expose month-over-month infrastructure growth curves. |
 
 ---
 
-### 4.2 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)
+### 4.3 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)
 
-#### 1. The Aliasing / Smoothing Blindspot ($Y$ Step Too Large):
+#### 1. The Aliasing / Information Loss Trap ($Y$ Step Too Large):
 - **The Pitfall**: Plotting a 24-hour graph with $Y = 1\text{ hour}$ averaging buckets.
-- **Consequence**: If a downstream payment gateway suffered a **complete 10-minute total outage** ($100\%$ errors) at 14:15, averaging that data over a 1-hour bucket reduces the measured failure rate to $\approx 16.6\%$. The graph shows a mild bump, completely masking a SEV-1 outage!
+- **The Nyquist-Shannon Theorem**: To detect a phenomenon of duration $\tau$, sampling frequency must be at least $f_s \ge \frac{2}{\tau}$.
+- **Consequence**: If a downstream payment gateway suffered a **complete 10-minute total outage** ($100\%$ errors) at 14:15, averaging that data over a 1-hour bucket reduces the measured failure rate to $\approx 16.6\%$. The graph shows a mild bump, completely masking a SEV-1 incident!
 
 #### 2. The Flapping Alert Trap ($X$ Window Too Small):
 - **The Pitfall**: Configuring Prometheus alerts with `rate(http_errors[5s]) > 0.05`.
@@ -226,45 +443,89 @@ $$\text{Query Template: } \text{"Metric over the last } \mathbf{X} \text{ (durat
 
 ---
 
-### 4.3 Fixed Windows vs. Sliding Continuous Windows
-- **Fixed Window (Tumbling Window)**: Evaluates counts within non-overlapping intervals (e.g. 00:00–00:05, 00:05–00:10). Vulnerable to boundary spikes (a burst split across 00:04:59 and 00:05:01 is halved).
-- **Sliding Continuous Window**: Evaluates metrics over the continuous trailing duration $[t - W, t]$.
+### 4.4 Fixed (Tumbling) Windows vs. Sliding Continuous Windows
 
-### 4.2 Simple Moving Average (SMA) vs. Cumulative Moving Average (CMA)
+- **Fixed Window (Tumbling Window)**: Evaluates counts within non-overlapping intervals (e.g. 00:00–00:05, 00:05–00:10). 
+  * *Boundary Spike Trap*: If a burst of 1,000 requests arrives between 00:04:50 and 00:05:10, a fixed 5-minute window divides the burst across two buckets (500 in bucket 1, 500 in bucket 2), hiding a rate limit violation.
+- **Sliding Continuous Window**: Evaluates metrics over the continuous trailing duration $[t - W, t]$. Accurately captures the full 1,000-request burst regardless of when it lands.
+
+---
+
+### 4.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)
+
+#### 1. Simple Moving Average (SMA):
 $$\text{SMA}_k = \frac{1}{k} \sum_{i=0}^{k-1} x_{t-i}$$
-SMA assigns equal weight to data from 5 minutes ago and data from 1 second ago.
+- Weights all $k$ observations equally. Suffers from lag and "ghost jumps" when an old outlier exits the window.
 
-### 4.3 Exponential Weighted Moving Average (EWMA)
-EWMA applies exponentially decreasing weights to older observations, making it highly responsive to sudden shifts:
+#### 2. Linear Weighted Moving Average (WMA):
+$$\text{WMA}_k = \frac{\sum_{i=1}^{k} i \cdot x_{t-k+i}}{\frac{k(k+1)}{2}}$$
+- Assigns linearly increasing weights to newer observations ($w_k > w_{k-1} > \dots > w_1$).
+
+---
+
+### 4.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics
+
+EWMA applies exponentially decaying weights to all past observations:
 
 $$S_t = \alpha \cdot x_t + (1 - \alpha) \cdot S_{t-1}$$
 Where:
-- $S_t$ = Current smoothed value.
+- $S_t$ = Current smoothed estimate.
 - $x_t$ = New raw measurement at time $t$.
-- $\alpha$ = Smoothing factor ($0 < \alpha \le 1$). Higher $\alpha$ reacts faster; lower $\alpha$ provides smoother dampening.
+- $\alpha$ = Smoothing factor ($0 < \alpha \le 1$).
+
+#### 1. The Effective Memory Horizon & Half-Life ($t_{1/2}$):
+The weight assigned to an observation $k$ steps in the past is $w_k = \alpha (1 - \alpha)^k$.
+The **Half-Life ($t_{1/2}$)** is the number of time steps required for an observation's influence to decay by $50\%$:
+$$t_{1/2} = \frac{\ln(0.5)}{\ln(1 - \alpha)} \approx \frac{0.693}{\alpha}$$
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 EWMA SMOOTHING FACTOR (&alpha;) CALIBRATION TABLE                 │
+├───────────┬──────────────┬──────────────────────────────────────────────────┤
+│ &alpha; VALUE │ HALF-LIFE    │ OPERATIONAL USE CASE                             │
+├───────────┼──────────────┼──────────────────────────────────────────────────┤
+│ $\alpha = 0.50$│ 1.0 sample   │ Ultra-fast incident detection (< 3 seconds)      │
+│ $\alpha = 0.20$│ 3.1 samples  │ Adaptive Limiter (TCP Vegas) gradient tracking   │
+│ $\alpha = 0.05$│ 13.5 samples │ Smooth baseline background tracking              │
+│ $\alpha = 0.01$│ 69.0 samples │ Multi-hour diurnal traffic trend smoothing       │
+└───────────┴──────────────┴──────────────────────────────────────────────────┘
+```
 
 ---
 
 ## 5. Seasonality, Trends & Relative Anomaly Detection
 
-### 5.1 Time-Series Decomposition: Trend, Seasonality & Residuals
-Any production metric $Y(t)$ (traffic volume, order rate, active connections) can be decomposed into three components:
-$$Y(t) = \text{Trend}(t) + \text{Seasonality}(t) + \text{Residuals}(t)$$
+### 5.1 Time-Series Decomposition: Additive vs. Multiplicative Models
+
+Any operational production metric $Y(t)$ can be decomposed into three underlying components:
 
 ```
 RAW METRIC (Y)        =   TREND (Long-Term Growth)  +  SEASONALITY (Weekly Cycle)  +  RESIDUALS (Noise/Incidents)
  ──/\_/\_/\_/\──────>     ──────────────/─────────>    ─/\_/\_/\_/\_/\─────────>      ──_--__--_--───────>
 ```
 
-### 5.2 Relative Anomaly Detection: X% Deviation from Previous Y Periods
-Static alerting thresholds (e.g. `traffic < 500 RPS`) fail because 200 RPS is an outage at 14:00 on Tuesday, but perfectly normal at 04:00 on Sunday.
+#### 1. Additive Model:
+$$Y(t) = \text{Trend}(t) + \text{Seasonality}(t) + \text{Residuals}(t)$$
+- Use when seasonal variations are constant in absolute magnitude regardless of total traffic volume.
+
+#### 2. Multiplicative Model:
+$$Y(t) = \text{Trend}(t) \times \text{Seasonality}(t) \times \text{Residuals}(t)$$
+- Use when seasonal swings scale proportionally with overall traffic volume (e.g. peak hours always double baseline traffic).
+
+---
+
+### 5.2 Relative Anomaly Detection: Measuring Percentage Deviations
+
+Static alerting thresholds (e.g. `traffic < 500 RPS`) fail because $200\text{ RPS}$ is a severe outage at 14:00 on Tuesday, but perfectly normal at 04:00 on Sunday.
 
 **Relative Measurement Formula**:
 $$\text{Deviation}_{\%} = \frac{Y(t) - Y_{\text{baseline}}(t)}{Y_{\text{baseline}}(t)} \times 100\%$$
 Where $Y_{\text{baseline}}(t)$ is the metric measured at the **exact same hour and day of the previous week(s)**:
 $$Y_{\text{baseline}}(t) = Y(t - 7\text{ days})$$
 
-### 5.3 Seasonally-Aware Prometheus Alerting (The `offset` Pattern)
+---
+
+### 5.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern
 
 ```yaml
 groups:
@@ -287,13 +548,46 @@ groups:
         annotations:
           summary: "Order velocity dropped >30% compared to same time last week"
           description: "Current RPS: {{ $values.B }}. Baseline last week: {{ $values.C }}."
+
+      - alert: LatencyElevatedRelativeSeasonality
+        # Alert if p95 latency is 50% higher than same hour last week
+        expr: |
+          (
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[10m])) by (le))
+            -
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[10m] offset 1w)) by (le))
+          )
+          /
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[10m] offset 1w)) by (le))
+          > 0.50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency is 50% higher than expected for this time of week"
 ```
 
-### 5.4 Holt-Winters Triple Exponential Smoothing
-Holt-Winters algorithm models three dynamic equations simultaneously:
-1. **Level Equation ($\ell_t$)**: The baseline value after adjusting for seasonality.
-2. **Trend Equation ($b_t$)**: The expected linear rate of change.
-3. **Seasonal Equation ($s_t$)**: The cyclical periodic factor.
+---
 
+### 5.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)
+
+The Holt-Winters algorithm models dynamic time series using three recurrence equations:
+
+1. **Level Equation ($\ell_t$)** (Smoothed value):
+   $$\ell_t = \alpha (y_t - s_{t-m}) + (1 - \alpha)(\ell_{t-1} + b_{t-1})$$
+2. **Trend Equation ($b_t$)** (Smoothed slope):
+   $$b_t = \beta (\ell_t - \ell_{t-1}) + (1 - \beta)b_{t-1}$$
+3. **Seasonal Equation ($s_t$)** (Cyclical adjustment for period $m$):
+   $$s_t = \gamma (y_t - \ell_{t-1} - b_{t-1}) + (1 - \gamma)s_{t-m}$$
+
+#### Forecasting Ahead $h$ Time Steps:
 $$\hat{y}_{t+h|t} = \ell_t + h \cdot b_t + s_{t+h-m}$$
-Used in Prometheus via `predict_linear()` and automated alerting engines (e.g. Datadog Anomaly Detection, AWS CloudWatch Anomaly Detector) to generate dynamic upper and lower confidence bounds around operational metrics.
+
+Where:
+- $\alpha, \beta, \gamma$ are smoothing constants for level, trend, and seasonality ($0 < \alpha, \beta, \gamma \le 1$).
+- $m$ is the period length (e.g. $m = 24\text{ hours}$ or $m = 7\text{ days}$).
+
+#### Prometheus Native Linear Prediction (`predict_linear`):
+For short-term trend projection without full triple smoothing:
+$$\text{PromQL: } \text{predict\_linear}(\text{node\_filesystem\_free\_bytes}[4\text{h}], 24 \times 3600) < 0$$
+*Application*: Alerts on disk space exhaustion 24 hours in advance by evaluating the 4-hour derivative trend.
