@@ -672,7 +672,11 @@ P(\text{Pipeline Success}) = \prod_{i=1}^{K} P(\text{Success}_i)
 ```
 
 If 3 sequential microservices each have 99.5% availability:
-$$P(\text{Pipeline Success}) = (0.995)^3 = 0.98507 \approx \mathbf{98.51\%}$$
+
+```math
+P(\text{Pipeline Success}) = (0.995)^3 = 0.98507 \approx \mathbf{98.51\%}
+```
+
 The composite availability drops below 99%, violating a 99.5% SLA!
 
 ---
