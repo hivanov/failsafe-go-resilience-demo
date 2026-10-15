@@ -26,23 +26,29 @@ This document provides a comprehensive, beginner-friendly, and mathematically ri
   - [3.3 The Fatal Flaw: The Percentile Averaging Fallacy (Jensen's Inequality)](#33-the-fatal-flaw-the-percentile-averaging-fallacy-jensens-inequality)
   - [3.4 Mergeable Quantile Sketches: t-digest, HdrHistogram & DDSketch](#34-mergeable-quantile-sketches-t-digest-hdrhistogram--ddsketch)
   - [3.5 Prometheus Histogram Bucket Interpolation (`histogram_quantile`)](#35-prometheus-histogram-bucket-interpolation-histogram_quantile)
-- [4. Boxplots & Dispersion Analysis (Tukey's Summary)](#4-boxplots--dispersion-analysis-tukeys-summary)
-  - [4.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)](#41-tukeys-five-number-summary--the-interquartile-range-iqr)
-  - [4.2 Standard Deviation (Sigma) vs. IQR: The Failure of Gaussian Normality](#42-standard-deviation-sigma-vs-iqr-the-failure-of-gaussian-normality)
-  - [4.3 Mathematical Outlier Classification (1.5 * IQR and 3.0 * IQR Rules)](#43-mathematical-outlier-classification-15--iqr-and-30--iqr-rules)
-  - [4.4 Skewness & Kurtosis in Operational Telemetry](#44-skewness--kurtosis-in-operational-telemetry)
-- [5. Time Windows & Moving Averages: Sizing the "Last X over Y" Equation](#5-time-windows--moving-averages-sizing-the-last-x-over-y-equation)
-  - [5.1 The "Last X over Y" Dual-Window Framework](#51-the-last-x-over-y-dual-window-framework)
-  - [5.2 Comprehensive Sizing Matrix for Operational Tasks](#52-comprehensive-sizing-matrix-for-operational-tasks)
-  - [5.3 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)](#53-the-3-critical-sizing-pitfalls-aliasing-flapping--inertia)
-  - [5.4 Fixed (Tumbling) Windows vs. Sliding Continuous Windows](#54-fixed-tumbling-windows-vs-sliding-continuous-windows)
-  - [5.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)](#55-simple-moving-average-sma-vs-linear-weighted-moving-average-wma)
-  - [5.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics](#56-exponential-weighted-moving-average-ewma--half-life-physics)
-- [6. Seasonality, Trends & Relative Anomaly Detection](#6-seasonality-trends--relative-anomaly-detection)
-  - [6.1 Time-Series Decomposition: Additive vs. Multiplicative Models](#61-time-series-decomposition-additive-vs-multiplicative-models)
-  - [6.2 Relative Anomaly Detection: Measuring Percentage Deviations](#62-relative-anomaly-detection-measuring-percentage-deviations)
-  - [6.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern](#63-seasonally-aware-prometheus-alerting-via-the-offset-pattern)
-  - [6.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)](#64-holt-winters-triple-exponential-smoothing-level-trend--seasonality)
+- [4. Linking Percentiles to SLAs: Sequential Pipelines vs. Parallel Fan-Out & Stochastic Modeling](#4-linking-percentiles-to-slas-sequential-pipelines-vs-parallel-fan-out--stochastic-modeling)
+  - [4.1 The SLA Contract in Probabilistic Terms](#41-the-sla-contract-in-probabilistic-terms)
+  - [4.2 Sequential Topologies: Sum of Random Variables & Convolution](#42-sequential-topologies-sum-of-random-variables--convolution)
+  - [4.3 Parallel Topologies: Extreme Value Distribution & Order Statistics](#43-parallel-topologies-extreme-value-distribution--order-statistics)
+  - [4.4 Stochastic Calculation Methods Explained in Detail](#44-stochastic-calculation-methods-explained-in-detail)
+  - [4.5 Real-World Execution Scenarios & Error Blast Radius Analysis](#45-real-world-execution-scenarios--error-blast-radius-analysis)
+- [5. Boxplots & Dispersion Analysis (Tukey's Summary)](#5-boxplots--dispersion-analysis-tukeys-summary)
+  - [5.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)](#51-tukeys-five-number-summary--the-interquartile-range-iqr)
+  - [5.2 Standard Deviation (Sigma) vs. IQR: The Failure of Gaussian Normality](#52-standard-deviation-sigma-vs-iqr-the-failure-of-gaussian-normality)
+  - [5.3 Mathematical Outlier Classification (1.5 * IQR and 3.0 * IQR Rules)](#53-mathematical-outlier-classification-15--iqr-and-30--iqr-rules)
+  - [5.4 Skewness & Kurtosis in Operational Telemetry](#54-skewness--kurtosis-in-operational-telemetry)
+- [6. Time Windows & Moving Averages: Sizing the "Last X over Y" Equation](#6-time-windows--moving-averages-sizing-the-last-x-over-y-equation)
+  - [6.1 The "Last X over Y" Dual-Window Framework](#61-the-last-x-over-y-dual-window-framework)
+  - [6.2 Comprehensive Sizing Matrix for Operational Tasks](#62-comprehensive-sizing-matrix-for-operational-tasks)
+  - [6.3 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)](#63-the-3-critical-sizing-pitfalls-aliasing-flapping--inertia)
+  - [6.4 Fixed (Tumbling) Windows vs. Sliding Continuous Windows](#64-fixed-tumbling-windows-vs-sliding-continuous-windows)
+  - [6.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)](#65-simple-moving-average-sma-vs-linear-weighted-moving-average-wma)
+  - [6.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics](#66-exponential-weighted-moving-average-ewma--half-life-physics)
+- [7. Seasonality, Trends & Relative Anomaly Detection](#7-seasonality-trends--relative-anomaly-detection)
+  - [7.1 Time-Series Decomposition: Additive vs. Multiplicative Models](#71-time-series-decomposition-additive-vs-multiplicative-models)
+  - [7.2 Relative Anomaly Detection: Measuring Percentage Deviations](#72-relative-anomaly-detection-measuring-percentage-deviations)
+  - [7.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern](#73-seasonally-aware-prometheus-alerting-via-the-offset-pattern)
+  - [7.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)](#74-holt-winters-triple-exponential-smoothing-level-trend--seasonality)
 
 ---
 
@@ -597,7 +603,252 @@ Q(q) = le_{lower} + (le_{upper} - le_{lower}) \times \frac{q \cdot N_{total} - \
 
 ---
 
-## 4. Boxplots & Dispersion Analysis (Tukey's Summary)
+## 4. Linking Percentiles to SLAs: Sequential Pipelines vs. Parallel Fan-Out & Stochastic Modeling
+
+A Service Level Agreement (SLA) or Service Level Objective (SLO) defines the formal boundary of acceptable system performance. In modern distributed architectures, SLAs cannot be managed as simple static averages; they must be modeled as **probabilistic constraints** across complex dependency topologies.
+
+---
+
+### 4.1 The SLA Contract in Probabilistic Terms
+
+Mathematically, an SLA contract is a **joint probability statement** combining availability and latency bounds:
+
+```math
+P(\text{HTTP Status} \in \{200, 201\} \cap \text{Latency} \le T_{\text{SLA}}) \ge \text{SLO Target}
+```
+
+For a typical Tier-1 production service with a "Three Nines" (99.9%) SLA and a 500ms latency ceiling:
+
+```math
+P(\text{Success} \cap \text{Latency} \le 500\text{ms}) \ge 0.999 \quad (99.9\%)
+```
+
+#### How Percentile Breaches Exhaust Error Budgets:
+- If a service delivers 100% HTTP 200 OK responses, but its **p99.9 latency is 1,200ms**, then 0.1% of requests exceed the 500ms ceiling.
+- **Result**: The entire monthly error budget (43.8 minutes of allowable degraded time at 99.9%) is **completely exhausted by latency alone**, even with zero hard crashes or 500 status codes.
+
+---
+
+### 4.2 Sequential Topologies: Sum of Random Variables & Convolution
+
+In a sequential execution pipeline, a client request executes across multiple downstream stages in linear sequence (P_1 -> P_2 -> P_3):
+
+```
+  [ Ingress Request ] ───> [ Service 1 (T1) ] ───> [ Service 2 (T2) ] ───> [ Service 3 (T3) ] ───> [ Response ]
+```
+
+The total execution time T_total is the **sum of random variables**:
+
+```math
+T_{\text{total}} = T_1 + T_2 + T_3 = \sum_{i=1}^{K} T_i
+```
+
+#### The Fundamental Sum Fallacy:
+```math
+\text{Fatal Fallacy: } p_{99}(T_{\text{total}}) \ne p_{99}(T_1) + p_{99}(T_2) + p_{99}(T_3)
+```
+
+**Why Percentiles Cannot Be Summed**:
+The probability that Service 1 experiences its p99 tail **AND** Service 2 experiences its p99 tail **AND** Service 3 experiences its p99 tail simultaneously on the exact same transaction is:
+
+```math
+P(\text{Tail}_1 \cap \text{Tail}_2 \cap \text{Tail}_3) = (0.01) \times (0.01) \times (0.01) = 10^{-6} = 0.0001\%
+```
+
+Adding individual p99 numbers (80ms + 250ms + 650ms = 980ms) estimates a hypothetical worst-case event that occurs only once every 1,000,000 requests (a p99.9999 event), drastically overestimating real-world p99 latency.
+
+#### Exact Analytical Probability Density Convolution:
+The true probability density function (PDF) of sequential execution time is the **Mathematical Convolution** of the individual stage PDFs:
+
+```math
+f_{T_{\text{total}}}(t) = (f_1 * f_2 * \dots * f_K)(t) = \int_{-\infty}^{\infty} f_1(\tau) f_2(t - \tau) \, d\tau
+```
+
+#### Sequential Pipeline Availability (The Multiplicative Penalty):
+For the entire sequential pipeline to succeed, **EVERY** stage must succeed. For K independent stages:
+
+```math
+P(\text{Pipeline Success}) = \prod_{i=1}^{K} P(\text{Success}_i)
+```
+
+If 3 sequential microservices each have 99.5% availability:
+$$P(\text{Pipeline Success}) = (0.995)^3 = 0.98507 \approx \mathbf{98.51\%}$$
+The composite availability drops below 99%, violating a 99.5% SLA!
+
+---
+
+### 4.3 Parallel Topologies: Extreme Value Distribution & Order Statistics
+
+In a scatter-gather / parallel fan-out topology (P_1 || P_2 || P_3), an ingress service dispatches K concurrent requests to backend workers:
+
+```
+                         ┌───> [ Service 1 (T1) ] ───┐
+                         ├───> [ Service 2 (T2) ] ───┤
+  [ Ingress Gateway ] ───┼───> [ Service 3 (T3) ] ───┼───> [ Aggregator Response ]
+                         └───> [ Service K (TK) ] ───┘
+```
+
+The total execution time is governed by the **single slowest response** (the Maximum Random Variable):
+
+```math
+T_{\text{total}} = \max(T_1, T_2, \dots, T_K)
+```
+
+#### The Joint Cumulative Distribution of Parallel Latency:
+The aggregated request completes within time t if and only if **ALL** K parallel services complete within time t:
+
+```math
+F_{T_{\text{total}}}(t) = P(T_{\text{total}} \le t) = P(T_1 \le t \cap T_2 \le t \cap \dots \cap T_K \le t)
+```
+
+For K independent parallel services with individual CDFs F_i(t):
+
+```math
+F_{T_{\text{total}}}(t) = \prod_{i=1}^{K} F_i(t)
+```
+
+If all K services share identical latency distributions F(t):
+
+```math
+F_{T_{\text{total}}}(t) = [F(t)]^K
+```
+
+#### Why SLAs Collapse in Fan-Out Topologies:
+Suppose each microservice individually satisfies a 99% SLA at 200ms (`F_i(200ms) = 0.99`). If your API Gateway fans out to K = 20 parallel services:
+
+```math
+F_{T_{\text{total}}}(200\text{ms}) = (0.99)^{20} \approx 0.8179 = \mathbf{81.8\%}
+```
+
+**The SLA Collapse**: The individual 99th percentile has deteriorated into the **81.8th percentile** of the aggregated response. Instead of 1% of users breaching the 200ms SLA, **18.2% of all users now suffer SLA violations**!
+
+---
+
+### 4.4 Stochastic Calculation Methods Explained in Detail
+
+Resilience architects and performance engineers utilize four primary stochastic methods to model composite system percentiles:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 FOUR STOCHASTIC CALCULATION METHODS IN SRE                  │
+├────────────────────┬─────────────────────────────┬──────────────────────────┤
+│ METHOD             │ MATHEMATICAL CORE           │ BEST OPERATIONAL USE     │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 1. Density         │ Continuous / FFT discrete   │ Exact latency percentile │
+│    Convolution     │ integral: (f * g)(t).       │ modeling in linear multi-│
+│                    │                             │ hop pipelines (A->B->C). │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 2. Order           │ Extreme Value joint CDF:    │ Parallel scatter-gather  │
+│    Statistics      │ F_max(t) = [F(t)]^K.        │ & Quorum consensus       │
+│                    │                             │ systems (M-of-K voting). │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 3. Monte Carlo     │ Random empirical sampling   │ Complex graphs with      │
+│    Simulation      │ over N = 1,000,000 trials.  │ retries, fallbacks, and  │
+│                    │                             │ non-linear branches.     │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ 4. Markov Chains   │ Stochastic transition       │ Availability modeling &  │
+│                    │ matrices: π_(t+1) = π_t P.  │ degradation recovery     │
+│                    │                             │ (Circuit Breaker states).│
+└────────────────────┴─────────────────────────────┴──────────────────────────┘
+```
+
+#### 1. Method 1: Discrete Probability Density Convolution via FFT
+When telemetry data is stored as discrete latency histograms a and b, calculating the sequential sum distribution analytically via direct convolution takes O(N^2) time. Using the **Fast Fourier Transform (FFT)** reduces computation to O(N log N):
+
+```math
+\mathbf{c} = \text{IFFT}\left(\text{FFT}(\mathbf{a}) \odot \text{FFT}(\mathbf{b})\right)
+```
+
+Where ⊙ represents the Hadamard (element-wise) vector product.
+
+#### 2. Method 2: Quorum & Majority Order Statistics
+If a parallel system requires only M out of K replicas to respond before returning (e.g. Cassandra / Raft quorum voting):
+
+```math
+F_{M\text{-of-}K}(t) = \sum_{j=M}^{K} \binom{K}{j} [F(t)]^j [1 - F(t)]^{K - j}
+```
+
+*Resilience Insight*: Quorum reads (M=2 out of K=3) eliminate the slowest replica from the critical path, cutting tail latency from the Maximum distribution down to the Median order statistic.
+
+#### 3. Method 3: Monte Carlo Numerical Simulation
+When dependencies feature dynamic retries with exponential jitter, circuit breakers, and conditional fallback caches, analytical closed-form equations become mathematically intractable.
+
+**Monte Carlo Simulation Algorithm**:
+1. Draw N = 1,000,000 synthetic trials.
+2. In each trial i, sample random service durations t_{i,1}, t_{i,2}, ..., t_{i,K} from empirical latency CDFs.
+3. Simulate control logic (e.g. if t_{i,1} > 150ms, fire hedge attempt t_{i,1b}).
+4. Extract exact empirical percentiles from the sorted outcome vector:
+
+```math
+p_{99} = \text{SortedLatencies}\left[\lceil 0.99 \times N \rceil\right]
+```
+
+---
+
+### 4.5 Real-World Execution Scenarios & Error Blast Radius Analysis
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 SEQUENTIAL VS. PARALLEL BLAST RADIUS MATRIX                 │
+├────────────────────┬─────────────────────────────┬──────────────────────────┤
+│ TOPOLOGY TYPE      │ PRIMARY BOTTLENECK          │ BLAST RADIUS HAZARD      │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ Sequential         │ Additive Latency Sum        │ Timeout cascades, locked │
+│ (A -> B -> C)      │ (T_total = T1 + T2 + T3)    │ DB rows, dangling state. │
+├────────────────────┼─────────────────────────────┼──────────────────────────┤
+│ Parallel           │ Tail Dominance of Slowest   │ Thread pool saturation,  │
+│ (A || B || C)      │ (T_total = max(T1, T2, T3)) │ 500s from non-core recs. │
+└────────────────────┴─────────────────────────────┴──────────────────────────┘
+```
+
+#### Scenario A: Sequential Checkout Pipeline (Latency Sum vs. Upstream Cascades)
+Consider a sequential 3-step checkout execution:
+1. **S_1: JWT Auth & Token Verification**: Median = 15ms, p99 = 80ms, Availability = 99.99%.
+2. **S_2: PostgreSQL Order DB Lock (`SELECT ... FOR UPDATE`)**: Median = 35ms, p99 = 250ms, Availability = 99.90%.
+3. **S_3: Stripe Payment Gateway API**: Median = 120ms, p99 = 650ms, Availability = 99.50%.
+
+| Metric | S_1 (Auth) | S_2 (Order DB) | S_3 (Payment) | Naive Sum (Sum p99) | True Stochastic p99 (Convolution) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **p50 (Median)** | 15ms | 35ms | 120ms | 170ms | **170ms** |
+| **p99 Latency** | 80ms | 250ms | 650ms | 980ms *(False)* | **760ms** *(True)* |
+| **Success Rate** | 99.99% | 99.90% | 99.50% | - | **99.39%** |
+
+##### Error Blast Radius & Cascading Failures:
+- **Upstream Ingress Timeout Breach**: If the Ingress Gateway enforces an 800ms SLA, and S_3 (Stripe) stalls for 1,200ms:
+  * The Ingress Gateway cuts the client connection with an HTTP `504 Gateway Timeout`.
+  * **Corrupted State Hazard**: S_1 and S_2 already committed resources (the inventory lock was acquired and database order record inserted). Without a Distributed Saga Compensating Transaction, the user is charged nothing but inventory remains locked forever.
+  * **Worker Goroutine Exhaustion**: Upstream HTTP worker threads remain blocked waiting for S_3 to finish, rapidly saturating thread pools and crashing unrelated endpoints across the cluster.
+
+---
+
+#### Scenario B: Parallel Aggregator Fan-Out (Soft vs. Hard Dependency Blast Radii)
+An E-commerce Product Details Page aggregates 5 parallel microservices:
+- **P_1: Inventory Service** (*Hard Critical Path*) — p95 = 40ms, p99 = 150ms.
+- **P_2: Pricing & Tax Engine** (*Hard Critical Path*) — p95 = 50ms, p99 = 180ms.
+- **P_3: Product Reviews Service** (*Soft Degradable Path*) — p95 = 80ms, p99 = 400ms.
+- **P_4: ML Recommendation Carousel** (*Soft Degradable Path*) — p95 = 120ms, p99 = 600ms.
+- **P_5: Shipping Rate Estimator** (*Soft Degradable Path*) — p95 = 60ms, p99 = 220ms.
+
+```
+PARALLEL FAN-OUT LATENCY PROFILE:
+Aggregated Request Latency = MAX( P1, P2, P3, P4, P5 )
+ML Recommendations (P4) ───██████████████████████████████████ (600ms) ───► DOMINATES TOTAL PAGE TIME!
+Inventory (P1)          ───██████ (150ms)
+```
+
+##### 1. Without Resilience Isolation (Naive Scatter-Gather):
+- **End-to-End Latency**: T = max(P_1, P_2, P_3, P_4, P_5).
+- The aggregate p99 latency balloons to **650ms** because the slow tail of the ML model (P_4) dominates the entire page.
+- **Blast Radius**: If P_4 suffers a memory leak and crashes, the entire Product Details Page fails with HTTP 500, losing 100% of customer sales.
+
+##### 2. With Resilience Isolation (Hard vs. Soft Partitioning + Hedging):
+- **Hard Dependencies (P_1, P_2)**: Execute with tight 200ms per-attempt timeouts and retry policies.
+- **Soft Dependencies (P_3, P_4, P_5)**: Wrapped in Fallback policies (returning empty arrays `[]` or cached static ratings) with a 150ms hedge deadline.
+- **Result**: Aggregate p99 latency drops from 650ms down to **190ms**, and the failure of secondary recommendation models has **zero blast radius** on revenue-generating core page rendering.
+
+---
+
+## 5. Boxplots & Dispersion Analysis (Tukey's Summary)
 
 A Boxplot (Box-and-Whisker Plot), formulated by mathematician John Tukey in 1977, provides a standardized 5-number visual summary of a latency distribution.
 
@@ -615,7 +866,7 @@ A Boxplot (Box-and-Whisker Plot), formulated by mathematician John Tukey in 1977
 
 ---
 
-### 4.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)
+### 5.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)
 
 1. **Minimum (Min)**: The smallest data point within the lower fence (Min >= Q1 - 1.5 * IQR).
 2. **First Quartile (Q1 / 25th Percentile)**: The value below which 25% of observations lie.
@@ -631,7 +882,7 @@ The **Interquartile Range (IQR)** represents the middle 50% of the entire datase
 
 ---
 
-### 4.2 Standard Deviation (Sigma) vs. IQR: The Failure of Gaussian Normality
+### 5.2 Standard Deviation (Sigma) vs. IQR: The Failure of Gaussian Normality
 
 In classical introductory statistics, dispersion is measured via Sample Variance (s²) and Standard Deviation (σ):
 
@@ -647,7 +898,7 @@ In classical introductory statistics, dispersion is measured via Sample Variance
 
 ---
 
-### 4.3 Mathematical Outlier Classification (1.5 * IQR and 3.0 * IQR Rules)
+### 5.3 Mathematical Outlier Classification (1.5 * IQR and 3.0 * IQR Rules)
 
 John Tukey defined rigorous mathematical boundaries ("fences") to classify anomalous observations:
 
@@ -676,7 +927,7 @@ John Tukey defined rigorous mathematical boundaries ("fences") to classify anoma
 
 ---
 
-### 4.4 Skewness & Kurtosis in Operational Telemetry
+### 5.4 Skewness & Kurtosis in Operational Telemetry
 
 Two higher-order statistical moments provide immediate diagnosis of system behavior:
 
@@ -700,7 +951,7 @@ Two higher-order statistical moments provide immediate diagnosis of system behav
 
 ---
 
-## 5. Time Windows & Moving Averages: Sizing the "Last X over Y" Equation
+## 6. Time Windows & Moving Averages: Sizing the "Last X over Y" Equation
 
 When configuring dashboards, Prometheus queries, and alerting rules, engineering teams must evaluate metrics across two distinct time dimensions:
 
@@ -726,7 +977,7 @@ When configuring dashboards, Prometheus queries, and alerting rules, engineering
 
 ---
 
-### 5.1 The "Last X over Y" Dual-Window Framework
+### 6.1 The "Last X over Y" Dual-Window Framework
 
 1. **X (Evaluation Horizon / Lookback Duration)**:
    Controls how much history is included in the statistical calculation (e.g. `rate(http_requests_total[5m])`).
@@ -735,7 +986,7 @@ When configuring dashboards, Prometheus queries, and alerting rules, engineering
 
 ---
 
-### 5.2 Comprehensive Sizing Matrix for Operational Tasks
+### 6.2 Comprehensive Sizing Matrix for Operational Tasks
 
 | Operational Task | Optimal X (Evaluation Window) | Optimal Y (Step / Resolution) | Rationale & Practical Example |
 | :--- | :--- | :--- | :--- |
@@ -747,7 +998,7 @@ When configuring dashboards, Prometheus queries, and alerting rules, engineering
 
 ---
 
-### 5.3 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)
+### 6.3 The 3 Critical Sizing Pitfalls (Aliasing, Flapping & Inertia)
 
 #### 1. The Aliasing / Information Loss Trap (Y Step Too Large):
 - **The Pitfall**: Plotting a 24-hour graph with Y = 1 hour averaging buckets.
@@ -769,7 +1020,7 @@ f_s \ge \frac{2}{\tau}
 
 ---
 
-### 5.4 Fixed (Tumbling) Windows vs. Sliding Continuous Windows
+### 6.4 Fixed (Tumbling) Windows vs. Sliding Continuous Windows
 
 - **Fixed Window (Tumbling Window)**: Evaluates counts within non-overlapping intervals (e.g. 00:00–00:05, 00:05–00:10). 
   * *Boundary Spike Trap*: If a burst of 1,000 requests arrives between 00:04:50 and 00:05:10, a fixed 5-minute window divides the burst across two buckets (500 in bucket 1, 500 in bucket 2), hiding a rate limit violation.
@@ -777,7 +1028,7 @@ f_s \ge \frac{2}{\tau}
 
 ---
 
-### 5.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)
+### 6.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)
 
 #### 1. Simple Moving Average (SMA):
 
@@ -797,7 +1048,7 @@ f_s \ge \frac{2}{\tau}
 
 ---
 
-### 5.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics
+### 6.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics
 
 EWMA applies exponentially decaying weights to all past observations:
 
@@ -832,9 +1083,9 @@ t_{1/2} = \frac{\ln(0.5)}{\ln(1 - \alpha)} \approx \frac{0.693}{\alpha}
 
 ---
 
-## 6. Seasonality, Trends & Relative Anomaly Detection
+## 7. Seasonality, Trends & Relative Anomaly Detection
 
-### 6.1 Time-Series Decomposition: Additive vs. Multiplicative Models
+### 7.1 Time-Series Decomposition: Additive vs. Multiplicative Models
 
 Any operational production metric Y(t) can be decomposed into three underlying components:
 
@@ -861,7 +1112,7 @@ Y(t) = \text{Trend}(t) \times \text{Seasonality}(t) \times \text{Residuals}(t)
 
 ---
 
-### 6.2 Relative Anomaly Detection: Measuring Percentage Deviations
+### 7.2 Relative Anomaly Detection: Measuring Percentage Deviations
 
 Static alerting thresholds (e.g. `traffic < 500 RPS`) fail because 200 RPS is a severe outage at 14:00 on Tuesday, but perfectly normal at 04:00 on Sunday.
 
@@ -879,7 +1130,7 @@ Y_{\text{baseline}}(t) = Y(t - 7\text{ days})
 
 ---
 
-### 6.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern
+### 7.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern
 
 ```yaml
 groups:
@@ -923,7 +1174,7 @@ groups:
 
 ---
 
-### 6.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)
+### 7.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)
 
 The Holt-Winters algorithm models dynamic time series using three recurrence equations:
 
