@@ -283,11 +283,11 @@ When analyzing any metric over days, weeks, or months, the graph looks like a ch
 └────────────────────┴─────────────────────────────┴──────────────────────────┘
 ```
 
-1. **Trend (**T(t)**)**:
+1. **Trend (T(t))**:
    Your business is growing by 5% every month. Over a 1-year graph, the baseline traffic drifts steadily upward.
-2. **Seasonality (**S(t)**)**:
+2. **Seasonality (S(t))**:
    Human beings sleep at night and shop during the day. Traffic rises at 08:00 AM, peaks at 14:00 PM, and drops at 03:00 AM every single day. On Black Friday or weekends, traffic surges predictably.
-3. **Residual Noise (**I(t)**)**:
+3. **Residual Noise (I(t))**:
    The random spikes, network fiber cuts, database crashes, or memory leaks that occur unexpectedly. Observability alert rules exist solely to isolate **Residual Anomalies** from natural Trend and Seasonality.
 
 ---
@@ -394,17 +394,22 @@ In software observability, response times are represented by two mathematical fu
 │ individual response time buckets.    │ request finishes in <= X ms.         │
 │ Identifies multimodal clusters.      │ Range: Strictly 0.0 (0%) to 1.0 (100)│
 └──────────────────────────────────────┴──────────────────────────────────────┘
-```math
-#### 1. Probability Density Function (PDF):
 ```
-f(x) = P(X = x)
+
+#### 1. Probability Density Function (PDF):
+
 ```math
+f(x) = P(X = x)
+```
+
 The PDF visualizes where execution time clusters. A service with an in-memory cache, an edge CDN, and a database will exhibit a **trimodal PDF** with distinct peaks at 1ms (RAM), 25ms (CDN), and 150ms (DB).
 
 #### 2. Cumulative Distribution Function (CDF):
-```
-F(x) = P(X \le x) = \int_{0}^{x} f(u) \, du
+
 ```math
+F(x) = P(X \le x) = \int_{0}^{x} f(u) \, du
+```
+
 The CDF is strictly monotonically increasing (0 <= F(x) <= 1). 
 - To verify an SLA contract (*"99% of requests must complete in 500ms or less"*), evaluate the CDF at x = 500ms. If F(500ms) >= 0.99, the SLA is satisfied.
 
@@ -415,18 +420,22 @@ The CDF is strictly monotonically increasing (0 <= F(x) <= 1).
 To overcome the arithmetic mean's distortion by large outliers, statisticians sometimes propose alternative Pythagorean means:
 
 1. **Geometric Mean**:
-```
-G = \left(\prod_{i=1}^{N} x_i\right)^{\frac{1}{N}} = \exp\left(\frac{1}{N} \sum_{i=1}^{N} \ln x_i\right)
+
 ```math
-*Use Case*: Useful for normalizing benchmarks across different machines (e.g., SPEC CPU benchmarks) where relative ratios matter.
-   *Failure in Latency*: Severely dampens extreme tails (a 2,000ms stall is log-compressed to ln(2000) ≈ 7.6), masking severe user latency spikes.
+G = \left(\prod_{i=1}^{N} x_i\right)^{\frac{1}{N}} = \exp\left(\frac{1}{N} \sum_{i=1}^{N} \ln x_i\right)
+```
+
+- *Use Case*: Useful for normalizing benchmarks across different machines (e.g., SPEC CPU benchmarks) where relative ratios matter.
+- *Failure in Latency*: Severely dampens extreme tails (a 2,000ms stall is log-compressed to ln(2000) ≈ 7.6), masking severe user latency spikes.
 
 2. **Harmonic Mean**:
-```
-H = \frac{N}{\sum_{i=1}^{N} \frac{1}{x_i}}
+
 ```math
-*Use Case*: Useful for averaging rates (e.g. Transactions Per Second / throughput across nodes).
-   *Failure in Latency*: Heavily biased toward the smallest numbers. A single fast failure (0.2ms) pulls the entire harmonic mean down to near-zero (1 / 0.2 = 5), making an outage look like high-speed performance.
+H = \frac{N}{\sum_{i=1}^{N} \frac{1}{x_i}}
+```
+
+- *Use Case*: Useful for averaging rates (e.g. Transactions Per Second / throughput across nodes).
+- *Failure in Latency*: Heavily biased toward the smallest numbers. A single fast failure (0.2ms) pulls the entire harmonic mean down to near-zero (1 / 0.2 = 5), making an outage look like high-speed performance.
 
 **Conclusion**: No single parametric scalar mean (Arithmetic, Geometric, or Harmonic) can characterize distributed system latency. Only **non-parametric quantiles (percentiles)** provide honest, actionable visibility.
 
@@ -443,9 +452,11 @@ A **Percentile** is the score below which a given percentage of observations fal
 
 #### Mathematical Estimation:
 For an ordered set of N latency measurements x(1) <= x(2) <= ... <= x(N):
-```
+
+```math
 \text{Rank}(p) = \left\lceil \frac{p}{100} \times N \right\rceil
 ```
+
 ```math
 p\text{-th Percentile} = x_{(\text{Rank})}
 ```
@@ -487,25 +498,31 @@ In production systems, each percentile band maps to a specific physical layer of
 │ p99.99     │ Kernel / Physical Network   │ TCP SYN retransmit drops (1s/3s),│
 │ (4 Nines)  │ Dropouts                    │ Pod rescheduling / OOM restarts. │
 └────────────┴─────────────────────────────┴──────────────────────────────────┘
-```math
+```
+
 ---
 
 ### 3.3 The Fatal Flaw: The Percentile Averaging Fallacy (Jensen's Inequality)
 
 A widespread, catastrophic error in SRE and DevOps dashboards is computing p99 per pod and then taking the arithmetic average of those p99 values across the cluster:
-```
-\text{FATAL ERROR: } \text{Cluster } p_{99} \ne \frac{p_{99}(\text{Pod } 1) + p_{99}(\text{Pod } 2) + \dots + p_{99}(\text{Pod } K)}{K}
+
 ```math
+\text{FATAL ERROR: } \text{Cluster } p_{99} \ne \frac{p_{99}(\text{Pod } 1) + p_{99}(\text{Pod } 2) + \dots + p_{99}(\text{Pod } K)}{K}
+```
+
 #### Mathematical Proof of the Fallacy:
 Percentiles are **rank-order non-linear operators**, not linear summations. By Jensen's Inequality, for any non-linear transformation g(X):
-```
-E[g(X)] \ne g(E[X])
+
 ```math
+E[g(X)] \ne g(E[X])
+```
+
 #### Real-World Production Example:
 Consider a cluster of 2 Kubernetes pods:
 - **Pod 1 (High Traffic, Healthy)**: Processes 10,000 requests with p99 = 50ms (only 100 requests were slower than 50ms).
 - **Pod 2 (Low Traffic / Startup, Degraded)**: Processes 100 requests with p99 = 2,000ms (only 1 request took 2000ms).
-```
+
+```math
 \text{Naive Arithmetic Average of } p_{99} = \frac{50\text{ ms} + 2000\text{ ms}}{2} = \mathbf{1,025\text{ ms}}
 ```
 
@@ -594,7 +611,8 @@ A Boxplot (Box-and-Whisker Plot), formulated by mathematician John Tukey in 1977
                         │                ▲                       ▲                │
                         │                └───────── IQR ─────────┘                │
                         │                       (Q3 - Q1)                         │
-```math
+```
+
 ---
 
 ### 4.1 Tukey's Five-Number Summary & The Interquartile Range (IQR)
@@ -606,17 +624,21 @@ A Boxplot (Box-and-Whisker Plot), formulated by mathematician John Tukey in 1977
 5. **Maximum (Max)**: The largest data point within the upper fence (Max <= Q3 + 1.5 * IQR).
 
 The **Interquartile Range (IQR)** represents the middle 50% of the entire dataset:
-```
-\text{IQR} = Q_3 - Q_1
+
 ```math
+\text{IQR} = Q_3 - Q_1
+```
+
 ---
 
 ### 4.2 Standard Deviation (Sigma) vs. IQR: The Failure of Gaussian Normality
 
 In classical introductory statistics, dispersion is measured via Sample Variance (s²) and Standard Deviation (σ):
-```
-\sigma = \sqrt{\frac{1}{N-1} \sum_{i=1}^{N} (x_i - \mu)^2}
+
 ```math
+\sigma = \sqrt{\frac{1}{N-1} \sum_{i=1}^{N} (x_i - \mu)^2}
+```
+
 #### Why Standard Deviation Fails for Service Latency:
 - The standard deviation formula relies on squaring differences from the mean (x_i - μ)².
 - In a Gaussian distribution, the Empirical 68-95-99.7 Rule holds (μ ± 2σ covers 95.4%, μ ± 3σ covers 99.7%).
@@ -628,22 +650,27 @@ In classical introductory statistics, dispersion is measured via Sample Variance
 ### 4.3 Mathematical Outlier Classification (1.5 * IQR and 3.0 * IQR Rules)
 
 John Tukey defined rigorous mathematical boundaries ("fences") to classify anomalous observations:
-```
+
+```math
 \text{Lower Inner Fence} = Q_1 - (1.5 \times \text{IQR})
 ```
+
 ```math
 \text{Upper Inner Fence} = Q_3 + (1.5 \times \text{IQR})
 ```
+
 ```math
 \text{Lower Outer Fence} = Q_1 - (3.0 \times \text{IQR})
 ```
+
 ```math
 \text{Upper Outer Fence} = Q_3 + (3.0 \times \text{IQR})
-```math
+```
+
 - **Mild High Outlier**: Any latency observation where:
-  Q3 + (1.5 * IQR) < Latency <= Q3 + (3.0 * IQR)
+  `Q3 + (1.5 * IQR) < Latency <= Q3 + (3.0 * IQR)`
 - **Extreme High Outlier**: Any latency observation where:
-  Latency > Q3 + (3.0 * IQR)
+  `Latency > Q3 + (3.0 * IQR)`
 
 *Operational Application*: When building automated load-test assertions, flag any test run where the ratio of Extreme High Outliers exceeds 0.1% of total traffic.
 
@@ -654,17 +681,21 @@ John Tukey defined rigorous mathematical boundaries ("fences") to classify anoma
 Two higher-order statistical moments provide immediate diagnosis of system behavior:
 
 #### 1. Skewness (γ1 / Asymmetry):
-```
-\gamma_1 = \frac{\frac{1}{N} \sum_{i=1}^{N} (x_i - \mu)^3}{\sigma^3}
+
 ```math
+\gamma_1 = \frac{\frac{1}{N} \sum_{i=1}^{N} (x_i - \mu)^3}{\sigma^3}
+```
+
 - γ1 = 0: Perfectly symmetric distribution.
 - γ1 > 0: **Positive (Right) Skew**. Normal for healthy software systems (vast majority of traffic fast, long tail of slow queries).
 - Sudden spike in γ1: Indicates tail latency degradation while the median remains unchanged.
 
 #### 2. Kurtosis (γ2 / Heavy-Tailedness):
-```
+
+```math
 \gamma_2 = \frac{\frac{1}{N} \sum_{i=1}^{N} (x_i - \mu)^4}{\sigma^4} - 3
 ```
+
 - γ2 > 0 (**Leptokurtic**): Heavy-tailed distribution. Outliers are frequent and extreme (typical during database lock escalation or retry storms).
 
 ---
@@ -721,9 +752,11 @@ When configuring dashboards, Prometheus queries, and alerting rules, engineering
 #### 1. The Aliasing / Information Loss Trap (Y Step Too Large):
 - **The Pitfall**: Plotting a 24-hour graph with Y = 1 hour averaging buckets.
 - **The Nyquist-Shannon Theorem**: To detect a phenomenon of duration τ, sampling frequency must be at least:
+
 ```math
 f_s \ge \frac{2}{\tau}
 ```
+
 - **Consequence**: If a downstream payment gateway suffered a **complete 10-minute total outage** (100% errors) at 14:15, averaging that data over a 1-hour bucket reduces the measured failure rate to ≈ 16.6%. The graph shows a mild bump, completely masking a SEV-1 incident!
 
 #### 2. The Flapping Alert Trap (X Window Too Small):
@@ -747,15 +780,19 @@ f_s \ge \frac{2}{\tau}
 ### 5.5 Simple Moving Average (SMA) vs. Linear Weighted Moving Average (WMA)
 
 #### 1. Simple Moving Average (SMA):
+
 ```math
 \text{SMA}_k = \frac{1}{k} \sum_{i=0}^{k-1} x_{t-i}
 ```
+
 - Weights all k observations equally. Suffers from lag and "ghost jumps" when an old outlier exits the window.
 
 #### 2. Linear Weighted Moving Average (WMA):
+
 ```math
 \text{WMA}_k = \frac{\sum_{i=1}^{k} i \cdot x_{t-k+i}}{\frac{k(k+1)}{2}}
 ```
+
 - Assigns linearly increasing weights to newer observations (w_k > w_{k-1} > ... > w_1).
 
 ---
@@ -763,20 +800,23 @@ f_s \ge \frac{2}{\tau}
 ### 5.6 Exponential Weighted Moving Average (EWMA) & Half-Life Physics
 
 EWMA applies exponentially decaying weights to all past observations:
+
 ```math
 S_t = \alpha \cdot x_t + (1 - \alpha) \cdot S_{t-1}
 ```
+
 Where:
 - S_t = Current smoothed estimate.
 - x_t = New raw measurement at time t.
 - α = Smoothing factor (0 < α <= 1).
 
 #### 1. The Effective Memory Horizon & Half-Life (t_½):
-The weight assigned to an observation k steps in the past is w_k = α(1 - α)^k.
-The **Half-Life (t_½)** is the number of time steps required for an observation's influence to decay by 50%:
+The weight assigned to an observation k steps in the past is `w_k = α(1 - α)^k`. The **Half-Life (t_½)** is the number of time steps required for an observation's influence to decay by 50%:
+
 ```math
 t_{1/2} = \frac{\ln(0.5)}{\ln(1 - \alpha)} \approx \frac{0.693}{\alpha}
 ```
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                 EWMA SMOOTHING FACTOR (alpha) CALIBRATION TABLE             │
@@ -804,15 +844,19 @@ RAW METRIC (Y)        =   TREND (Long-Term Growth)  +  SEASONALITY (Weekly Cycle
 ```
 
 #### 1. Additive Model:
+
 ```math
 Y(t) = \text{Trend}(t) + \text{Seasonality}(t) + \text{Residuals}(t)
 ```
+
 - Use when seasonal variations are constant in absolute magnitude regardless of total traffic volume.
 
 #### 2. Multiplicative Model:
+
 ```math
 Y(t) = \text{Trend}(t) \times \text{Seasonality}(t) \times \text{Residuals}(t)
 ```
+
 - Use when seasonal swings scale proportionally with overall traffic volume (e.g. peak hours always double baseline traffic).
 
 ---
@@ -822,13 +866,17 @@ Y(t) = \text{Trend}(t) \times \text{Seasonality}(t) \times \text{Residuals}(t)
 Static alerting thresholds (e.g. `traffic < 500 RPS`) fail because 200 RPS is a severe outage at 14:00 on Tuesday, but perfectly normal at 04:00 on Sunday.
 
 **Relative Measurement Formula**:
+
 ```math
 \text{Deviation}_{\%} = \frac{Y(t) - Y_{\text{baseline}}(t)}{Y_{\text{baseline}}(t)} \times 100\%
 ```
+
 Where Y_baseline(t) is the metric measured at the **exact same hour and day of the previous week(s)**:
+
 ```math
 Y_{\text{baseline}}(t) = Y(t - 7\text{ days})
 ```
+
 ---
 
 ### 6.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern
@@ -880,18 +928,25 @@ groups:
 The Holt-Winters algorithm models dynamic time series using three recurrence equations:
 
 1. **Level Equation (ℓ_t)** (Smoothed value):
+
 ```math
 \ell_t = \alpha (y_t - s_{t-m}) + (1 - \alpha)(\ell_{t-1} + b_{t-1})
 ```
+
 2. **Trend Equation (b_t)** (Smoothed slope):
+
 ```math
 b_t = \beta (\ell_t - \ell_{t-1}) + (1 - \beta)b_{t-1}
 ```
+
 3. **Seasonal Equation (s_t)** (Cyclical adjustment for period m):
+
 ```math
 s_t = \gamma (y_t - \ell_{t-1} - b_{t-1}) + (1 - \gamma)s_{t-m}
 ```
+
 #### Forecasting Ahead h Time Steps:
+
 ```math
 \hat{y}_{t+h|t} = \ell_t + h \cdot b_t + s_{t+h-m}
 ```
