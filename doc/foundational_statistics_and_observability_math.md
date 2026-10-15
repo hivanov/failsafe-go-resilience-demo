@@ -28,7 +28,7 @@ This document provides a comprehensive, beginner-friendly, and mathematically ri
   - [3.5 Prometheus Histogram Bucket Interpolation (`histogram_quantile`)](#35-prometheus-histogram-bucket-interpolation-histogram_quantile)
 - [4. Linking Percentiles to SLAs: Sequential Pipelines vs. Parallel Fan-Out & Stochastic Modeling](#4-linking-percentiles-to-slas-sequential-pipelines-vs-parallel-fan-out--stochastic-modeling)
   - [4.1 The SLA Contract in Probabilistic Terms](#41-the-sla-contract-in-probabilistic-terms)
-  - [4.2 Sequential Topologies: Sum of Random Variables & Convolution](#42-sequential-topologies-sum-of-random-variables--convolution)
+  - [4.2 Sequential Topologies: Sum of Random Variables & Convolution Mechanics](#42-sequential-topologies-sum-of-random-variables--convolution-mechanics)
   - [4.3 Parallel Topologies: Extreme Value Distribution & Order Statistics](#43-parallel-topologies-extreme-value-distribution--order-statistics)
   - [4.4 Stochastic Calculation Methods Explained in Detail](#44-stochastic-calculation-methods-explained-in-detail)
   - [4.5 Real-World Execution Scenarios & Error Blast Radius Analysis](#45-real-world-execution-scenarios--error-blast-radius-analysis)
@@ -49,6 +49,15 @@ This document provides a comprehensive, beginner-friendly, and mathematically ri
   - [7.2 Relative Anomaly Detection: Measuring Percentage Deviations](#72-relative-anomaly-detection-measuring-percentage-deviations)
   - [7.3 Seasonally-Aware Prometheus Alerting via the `offset` Pattern](#73-seasonally-aware-prometheus-alerting-via-the-offset-pattern)
   - [7.4 Holt-Winters Triple Exponential Smoothing (Level, Trend & Seasonality)](#74-holt-winters-triple-exponential-smoothing-level-trend--seasonality)
+- [8. Appendix: Master PromQL Resilience & Observability Query Catalog](#8-appendix-master-promql-resilience--observability-query-catalog)
+  - [8.1 Composite SLA & Joint Latency/Availability Compliance](#81-composite-sla--joint-latencyavailability-compliance)
+  - [8.2 Sequential Pipeline Multiplicative Availability](#82-sequential-pipeline-multiplicative-availability)
+  - [8.3 Parallel Fan-Out SLA & Quorum Degradation Monitoring](#83-parallel-fan-out-sla--quorum-degradation-monitoring)
+  - [8.4 Fallback Activation Ratio & Degraded Mode Exposure](#84-fallback-activation-ratio--degraded-mode-exposure)
+  - [8.5 Circuit Breaker Flapping & State Transition Velocity](#85-circuit-breaker-flapping--state-transition-velocity)
+  - [8.6 Bulkhead Queue Saturation & Drop Pressure](#86-bulkhead-queue-saturation--drop-pressure)
+  - [8.7 Retry Amplification Multiplier & Storm Velocity](#87-retry-amplification-multiplier--storm-velocity)
+  - [8.8 Quantile Skewness & Tail Dispersion Ratio (p99 / p50)](#88-quantile-skewness--tail-dispersion-ratio-p99--p50)
 
 ---
 
@@ -627,9 +636,25 @@ P(\text{Success} \cap \text{Latency} \le 500\text{ms}) \ge 0.999 \quad (99.9\%)
 - If a service delivers 100% HTTP 200 OK responses, but its **p99.9 latency is 1,200ms**, then 0.1% of requests exceed the 500ms ceiling.
 - **Result**: The entire monthly error budget (43.8 minutes of allowable degraded time at 99.9%) is **completely exhausted by latency alone**, even with zero hard crashes or 500 status codes.
 
+#### Inline PromQL: Measuring Exact Joint SLA Compliance Ratio
+To evaluate whether a service meets its combined availability and latency SLA directly in Prometheus:
+
+```promql
+# Joint SLA Compliance: Percentage of all requests that are BOTH HTTP 2xx and <= 500ms
+(
+  sum(rate(http_request_duration_seconds_bucket{le="0.5", status=~"2.."}[5m]))
+  /
+  sum(rate(http_requests_total[5m]))
+) >= 0.999
+```
+*Why this PromQL is composed this way*:
+- `http_request_duration_seconds_bucket{le="0.5", status=~"2.."}` selects only the counter tracking requests that finished in $\le 0.5\text{s}$ AND returned a success status.
+- `rate(...[5m])` calculates per-second request rate over the rolling 5-minute window.
+- Dividing by `sum(rate(http_requests_total[5m]))` normalizes the rate into a strict 0.0 to 1.0 probability ratio.
+
 ---
 
-### 4.2 Sequential Topologies: Sum of Random Variables & Convolution
+### 4.2 Sequential Topologies: Sum of Random Variables & Convolution Mechanics
 
 In a sequential execution pipeline, a client request executes across multiple downstream stages in linear sequence (P_1 -> P_2 -> P_3):
 
@@ -643,7 +668,7 @@ The total execution time T_total is the **sum of random variables**:
 T_{\text{total}} = T_1 + T_2 + T_3 = \sum_{i=1}^{K} T_i
 ```
 
-#### The Fundamental Sum Fallacy:
+#### 1. The Fundamental Sum Fallacy:
 ```math
 \text{Fatal Fallacy: } p_{99}(T_{\text{total}}) \ne p_{99}(T_1) + p_{99}(T_2) + p_{99}(T_3)
 ```
@@ -657,14 +682,35 @@ P(\text{Tail}_1 \cap \text{Tail}_2 \cap \text{Tail}_3) = (0.01) \times (0.01) \t
 
 Adding individual p99 numbers (80ms + 250ms + 650ms = 980ms) estimates a hypothetical worst-case event that occurs only once every 1,000,000 requests (a p99.9999 event), drastically overestimating real-world p99 latency.
 
-#### Exact Analytical Probability Density Convolution:
+#### 2. Exact Analytical Probability Density Convolution:
 The true probability density function (PDF) of sequential execution time is the **Mathematical Convolution** of the individual stage PDFs:
 
 ```math
 f_{T_{\text{total}}}(t) = (f_1 * f_2 * \dots * f_K)(t) = \int_{-\infty}^{\infty} f_1(\tau) f_2(t - \tau) \, d\tau
 ```
 
-#### Sequential Pipeline Availability (The Multiplicative Penalty):
+##### Step-by-Step Discrete Convolution Calculation Example:
+Suppose we have two discrete latency stages with time measured in 10ms discrete buckets:
+- **Stage 1 (Auth)**: $P(T_1 = 10\text{ms}) = 0.80$, $P(T_1 = 20\text{ms}) = 0.20$
+- **Stage 2 (Database)**: $P(T_2 = 10\text{ms}) = 0.70$, $P(T_2 = 20\text{ms}) = 0.30$
+
+The discrete convolution formula calculates the combined probability for every possible sum $k$:
+
+```math
+P(T_{\text{total}} = k) = \sum_{j} P(T_1 = j) \times P(T_2 = k - j)
+```
+
+1. **For Total Time = 20ms (10ms + 10ms)**:
+   $$P(T_{\text{total}} = 20) = P(T_1 = 10) \times P(T_2 = 10) = 0.80 \times 0.70 = \mathbf{0.56} \quad (56\%)$$
+2. **For Total Time = 30ms (10ms + 20ms OR 20ms + 10ms)**:
+   $$P(T_{\text{total}} = 30) = (0.80 \times 0.30) + (0.20 \times 0.70) = 0.24 + 0.14 = \mathbf{0.38} \quad (38\%)$$
+3. **For Total Time = 40ms (20ms + 20ms)**:
+   $$P(T_{\text{total}} = 40) = P(T_1 = 20) \times P(T_2 = 20) = 0.20 \times 0.30 = \mathbf{0.06} \quad (6\%)$$
+
+*Total Verification*: $0.56 + 0.38 + 0.06 = 1.00$ ($100\%$).  
+*Observation*: Notice how the composite distribution smoothly shifts rightward and disperses. The maximum tail (40ms) has a probability of only $6\%$, whereas summing the individual maximums would have erroneously treated 40ms as a high-probability event.
+
+#### 3. Sequential Pipeline Availability (The Multiplicative Penalty):
 For the entire sequential pipeline to succeed, **EVERY** stage must succeed. For K independent stages:
 
 ```math
@@ -678,6 +724,27 @@ P(\text{Pipeline Success}) = (0.995)^3 = 0.98507 \approx \mathbf{98.51\%}
 ```
 
 The composite availability drops below 99%, violating a 99.5% SLA!
+
+##### First-Order Taylor Approximation for High Availability ($A_i \approx 1$):
+When availability is high ($A_i \ge 0.99$), the composite unavailability ($U = 1 - A$) is approximately the **sum of individual unavailabilities**:
+
+```math
+U_{\text{pipeline}} = 1 - \prod_{i=1}^{K} A_i \approx \sum_{i=1}^{K} (1 - A_i) = \sum_{i=1}^{K} U_i
+```
+
+*Example*: If 3 services each have 0.5% unavailability ($U_1 = U_2 = U_3 = 0.005$), composite unavailability is $\approx 0.005 + 0.005 + 0.005 = 0.015$ ($1.5\% \implies 98.5\%$ availability).
+
+#### Inline PromQL: Measuring Composite Sequential Pipeline Availability
+```promql
+# Composite Availability across 3 sequential stages (Auth -> OrderDB -> Payment)
+(
+  (sum(rate(http_requests_total{service="auth", status=~"2.."}[5m])) / sum(rate(http_requests_total{service="auth"}[5m])))
+  *
+  (sum(rate(http_requests_total{service="order-db", status=~"2.."}[5m])) / sum(rate(http_requests_total{service="order-db"}[5m])))
+  *
+  (sum(rate(http_requests_total{service="payment", status=~"2.."}[5m])) / sum(rate(http_requests_total{service="payment"}[5m])))
+)
+```
 
 ---
 
@@ -698,7 +765,7 @@ The total execution time is governed by the **single slowest response** (the Max
 T_{\text{total}} = \max(T_1, T_2, \dots, T_K)
 ```
 
-#### The Joint Cumulative Distribution of Parallel Latency:
+#### 1. The Joint Cumulative Distribution of Parallel Latency:
 The aggregated request completes within time t if and only if **ALL** K parallel services complete within time t:
 
 ```math
@@ -717,7 +784,7 @@ If all K services share identical latency distributions F(t):
 F_{T_{\text{total}}}(t) = [F(t)]^K
 ```
 
-#### Why SLAs Collapse in Fan-Out Topologies:
+#### 2. Why SLAs Collapse in Fan-Out Topologies:
 Suppose each microservice individually satisfies a 99% SLA at 200ms (`F_i(200ms) = 0.99`). If your API Gateway fans out to K = 20 parallel services:
 
 ```math
@@ -725,6 +792,18 @@ F_{T_{\text{total}}}(200\text{ms}) = (0.99)^{20} \approx 0.8179 = \mathbf{81.8\%
 ```
 
 **The SLA Collapse**: The individual 99th percentile has deteriorated into the **81.8th percentile** of the aggregated response. Instead of 1% of users breaching the 200ms SLA, **18.2% of all users now suffer SLA violations**!
+
+#### Inline PromQL: Parallel Fan-Out SLA Compliance Rate
+```promql
+# Probability that ALL 3 parallel services (inventory, pricing, reviews) complete in <= 200ms
+(
+  (sum(rate(http_request_duration_seconds_bucket{service="inventory", le="0.2"}[5m])) / sum(rate(http_requests_total{service="inventory"}[5m])))
+  *
+  (sum(rate(http_request_duration_seconds_bucket{service="pricing", le="0.2"}[5m])) / sum(rate(http_requests_total{service="pricing"}[5m])))
+  *
+  (sum(rate(http_request_duration_seconds_bucket{service="reviews", le="0.2"}[5m])) / sum(rate(http_requests_total{service="reviews"}[5m])))
+)
+```
 
 ---
 
@@ -786,6 +865,15 @@ When dependencies feature dynamic retries with exponential jitter, circuit break
 ```math
 p_{99} = \text{SortedLatencies}\left[\lceil 0.99 \times N \rceil\right]
 ```
+
+#### 4. Method 4: Markov Chain State-Transition Reliability Analysis
+Models state transitions (e.g. `CLOSED` -> `OPEN` -> `HALF_OPEN`) with transition probability matrix $\mathbf{P}$:
+
+```math
+\mathbf{\pi}_{t+1} = \mathbf{\pi}_t \mathbf{P}
+```
+
+The stationary steady-state distribution $\mathbf{\pi}^*$ satisfies $\mathbf{\pi}^* \mathbf{P} = \mathbf{\pi}^*$, allowing exact prediction of the percentage of requests fast-failed in the `OPEN` state.
 
 ---
 
@@ -1218,3 +1306,154 @@ predict_linear(node_filesystem_free_bytes[4h], 24 * 3600) < 0
 ```
 
 *Application*: Alerts on disk space exhaustion 24 hours in advance by evaluating the 4-hour derivative trend.
+
+
+---
+
+## 8. Appendix: Master PromQL Resilience & Observability Query Catalog
+
+This appendix provides a centralized production reference of all PromQL queries used to monitor resilience mechanics, composite availability, order statistics, fallback ratios, and anomaly detection.
+
+---
+
+### 8.1 Composite SLA & Joint Latency/Availability Compliance
+
+```promql
+# 1. Joint SLA Compliance Ratio (HTTP 2xx AND Latency <= 500ms)
+# Target: >= 0.999 (99.9%)
+(
+  sum(rate(http_request_duration_seconds_bucket{le="0.5", status=~"2.."}[5m]))
+  /
+  sum(rate(http_requests_total[5m]))
+)
+```
+
+*Composition Logic*:
+- **`http_request_duration_seconds_bucket{le="0.5", status=~"2.."}`**: Selects the cumulative histogram bucket containing requests that completed in $\le 500	ext{ms}$ with successful status.
+- **`rate(...[5m])`**: Computes per-second event rates over a 5-minute rolling window to smooth short-term traffic micro-bursts.
+- **`sum(...) / sum(...)`**: Normalizes successful in-budget transactions against total ingress traffic.
+
+---
+
+### 8.2 Sequential Pipeline Multiplicative Availability
+
+```promql
+# 2. End-to-End Sequential Availability across 3 Stages (Auth -> OrderDB -> Payment)
+# Target: >= 0.995 (99.5%)
+(
+  (sum(rate(http_requests_total{service="auth", status=~"2.."}[5m])) / sum(rate(http_requests_total{service="auth"}[5m])))
+  *
+  (sum(rate(http_requests_total{service="order-db", status=~"2.."}[5m])) / sum(rate(http_requests_total{service="order-db"}[5m])))
+  *
+  (sum(rate(http_requests_total{service="payment", status=~"2.."}[5m])) / sum(rate(http_requests_total{service="payment"}[5m])))
+)
+```
+
+*Composition Logic*:
+- Evaluates individual availability ratios $A_1, A_2, A_3$ independently.
+- Multiplies the three scalar rate ratios together ($A_1 	imes A_2 	imes A_3$) to reflect the mathematical multiplicative penalty of sequential dependency chains.
+
+---
+
+### 8.3 Parallel Fan-Out SLA & Quorum Degradation Monitoring
+
+```promql
+# 3. Parallel Scatter-Gather Joint Compliance (All 3 Parallel Calls <= 200ms)
+# Target: >= 0.95 (95%)
+(
+  (sum(rate(http_request_duration_seconds_bucket{service="inventory", le="0.2"}[5m])) / sum(rate(http_requests_total{service="inventory"}[5m])))
+  *
+  (sum(rate(http_request_duration_seconds_bucket{service="pricing", le="0.2"}[5m])) / sum(rate(http_requests_total{service="pricing"}[5m])))
+  *
+  (sum(rate(http_request_duration_seconds_bucket{service="reviews", le="0.2"}[5m])) / sum(rate(http_requests_total{service="reviews"}[5m])))
+)
+```
+
+*Composition Logic*:
+- Implements the Extreme Value joint CDF equation $F_{\max}(t) = \prod F_i(t)$ across concurrent microservices.
+- Alerts when joint parallel tail latency breaches the SLA budget even when individual services appear healthy in isolation.
+
+---
+
+### 8.4 Fallback Activation Ratio & Degraded Mode Exposure
+
+```promql
+# 4. Fallback Activation Ratio (Percentage of traffic served in degraded state)
+# Target: <= 0.01 (Less than 1% degraded traffic under normal operation)
+(
+  sum(rate(resilience_fallback_executions_total[5m]))
+  /
+  sum(rate(http_requests_total[5m]))
+)
+```
+
+*Composition Logic*:
+- Measures the fraction of requests that received a degraded fallback response (e.g. empty recommendations or stale cache reads).
+- Prevents the "Silent 200 OK" trap where an application returns HTTP 200 while delivering degraded fallback data.
+
+---
+
+### 8.5 Circuit Breaker Flapping & State Transition Velocity
+
+```promql
+# 5. Circuit Breaker State Transition Velocity (State changes per minute)
+# Alert if transition rate > 2 per minute (indicates rapid flapping between OPEN and HALF-OPEN)
+sum(rate(resilience_circuit_breaker_state_transitions_total[5m])) * 60 > 2
+```
+
+*Composition Logic*:
+- Tracks changes between `CLOSED`, `OPEN`, and `HALF_OPEN` states.
+- Multiplies 5-minute per-second rates by 60 to convert to transitions per minute.
+
+---
+
+### 8.6 Bulkhead Queue Saturation & Drop Pressure
+
+```promql
+# 6. Bulkhead Concurrency Saturation Ratio
+# Alert if active concurrency exceeds 90% of configured maximum limit
+(
+  sum(resilience_bulkhead_active_concurrency)
+  /
+  sum(resilience_bulkhead_max_concurrency)
+) > 0.90
+```
+
+*Composition Logic*:
+- Real-time gauge evaluation tracking active semaphore permits against capacity.
+- Triggers anticipatory autoscaling before queue bloat delays requests.
+
+---
+
+### 8.7 Retry Amplification Multiplier & Storm Velocity
+
+```promql
+# 7. Retry Multiplier Factor (Total attempts vs. Unique ingress requests)
+# Alert if multiplier > 1.30 (indicates 30% additional traffic generated by retry loops)
+(
+  sum(rate(http_requests_total{type="downstream_attempt"}[5m]))
+  /
+  sum(rate(http_requests_total{type="ingress_request"}[5m]))
+) > 1.30
+```
+
+*Composition Logic*:
+- Quantifies downstream amplification factor to detect catastrophic retry storms and self-inflicted DDoS conditions.
+
+---
+
+### 8.8 Quantile Skewness & Tail Dispersion Ratio (p99 / p50)
+
+```promql
+# 8. Tail Dispersion Ratio (p99 Latency / p50 Median Latency)
+# Alert if p99 is more than 10x greater than median (indicates severe tail bifurcation)
+(
+  histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+  /
+  histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+) > 10.0
+```
+
+*Composition Logic*:
+- Evaluates the non-parametric ratio of extreme tail latency ($p_{99}$) to median path latency ($p_{50}$).
+- Accurately diagnoses multimodal lock contention, garbage collection freezes, and queueing head-of-line blocking.
